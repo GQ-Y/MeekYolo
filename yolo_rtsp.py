@@ -195,7 +195,46 @@ class MeekYolo:
         # 读取图片
         frame = cv2.imread(self.image_path)
         if frame is None:
-            raise Exception(f"法读取图片: {self.image_path}")
+            raise Exception(f"无法读取图片: {self.image_path}")
+        
+        # 设置最大分析次数和最小目标数变化阈值
+        max_attempts = 5
+        min_change_threshold = 0.1  # 目标数量变化阈值（10%）
+        prev_num_objects = 0
+        stable_count = 0
+        attempt = 0
+        
+        while attempt < max_attempts:
+            attempt += 1
+            
+            # 处理图片
+            results = self.process_frame(frame)
+            current_num_objects = len(results)
+            
+            # 计算目标数量的变化率
+            if prev_num_objects > 0:
+                change_rate = abs(current_num_objects - prev_num_objects) / prev_num_objects
+            else:
+                change_rate = 1.0 if current_num_objects > 0 else 0.0
+            
+            # 如果目标数量变化小于阈值，增加稳定计数
+            if change_rate <= min_change_threshold:
+                stable_count += 1
+            else:
+                stable_count = 0
+            
+            # 如果连续两次检测结果稳定，认为已检测到所有目标
+            if stable_count >= 2:
+                break
+            
+            prev_num_objects = current_num_objects
+            
+            if self.config['print']['enabled']:
+                print(f"\r分析进度: {attempt}/{max_attempts}, 当前检测到 {current_num_objects} 个目标", 
+                      end="", flush=True)
+            
+            # 短暂等待以确保模型有足够时间处理
+            time.sleep(0.1)
         
         # 处理图片
         results = self.process_frame(frame)
@@ -204,6 +243,7 @@ class MeekYolo:
         # 保存结果
         cv2.imwrite(self.save_path, frame)
         if self.config['print']['enabled']:
+            print(f"\n分析完成，共检测到 {len(results)} 个目标")
             print(f"结果已保存至: {self.save_path}")
         
         self.running = False
@@ -250,15 +290,20 @@ class MeekYolo:
         out = cv2.VideoWriter(self.save_path, fourcc, self.output_fps, (width, height))
         
         frame_count = 0
+        last_print_time = time.time()
         try:
-            while self.running:  # 修改循环条件
+            while self.running:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
                 
                 frame_count += 1
-                if self.config['print']['enabled']:
-                    print(f"\r处理进度: {frame_count}/{total_frames}", end="")
+                # 每秒只更新一次进度显示
+                current_time = time.time()
+                if self.config['print']['enabled'] and (current_time - last_print_time) >= 1.0:
+                    progress = (frame_count / total_frames) * 100
+                    print(f"\r处理进度: {frame_count}/{total_frames} ({progress:.1f}%)", end="", flush=True)
+                    last_print_time = current_time
                 
                 # 处理帧
                 results = self.process_frame(frame)
@@ -268,18 +313,30 @@ class MeekYolo:
                 out.write(frame)
                 
                 # 显示结果
-                cv2.imshow(self.config['display']['window_name'], frame)
+                if self.config['display']['show_window']:
+                    # 缩放图片以减少内存使用
+                    display_frame = cv2.resize(frame, (width//2, height//2))
+                    cv2.imshow(self.config['display']['window_name'], display_frame)
+                
                 if cv2.waitKey(1) & 0xFF == ord('q'):
-                    self.running = False  # 修改退出方式
+                    self.running = False
                     break
-                    
+                
+                # 释放一些内存
+                del results
+                if 'display_frame' in locals():
+                    del display_frame
+                
         finally:
             if self.config['print']['enabled']:
-                print(f"\n视处理完成，结果保存至: {self.save_path}")
+                print(f"\n视频处理完成，结果保存至: {self.save_path}")
             self.cap.release()
             out.release()
             cv2.destroyAllWindows()
-            print("\n分析已完成")  # 添加完成提示
+            # 强制进行垃圾回收
+            import gc
+            gc.collect()
+            print("\n分析已完成")
 
     def get_color(self, track_id):
         """为每个track_id生成唯一的颜色"""
@@ -311,7 +368,7 @@ class MeekYolo:
                 conf = box.conf.item()
                 cls_idx = int(box.cls.item())
                 cls_name = self.names.get(cls_idx, '未知')
-                # 根据配置决定是否获取跟踪ID
+                # 根据配置定是否获取跟踪ID
                 track_id = int(box.id[0]) if (self.config['tracking']['enabled'] and box.id is not None) else -1
                 processed_results.append(([x1, y1, x2, y2], conf, cls_name, track_id))
                 
@@ -431,7 +488,7 @@ class MeekYolo:
                 if text_bg_x1 < 0:
                     text_bg_x1 = max(0, x1 - margin - text_width - 2 * margin)
                     text_bg_x2 = max(0, x1 - margin)
-                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不��，就放到下面
+                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不，就放到下面
                     text_bg_y2 = text_bg_y1 + info_height
             
             info_boxes.append((text_bg_x1, text_bg_y1, text_bg_x2, text_bg_y2))
@@ -655,4 +712,4 @@ config      - 显示当前配置
             }
 
 if __name__ == "__main__":
-    print("请使用 run.py 启动完整服务") 
+    print("请使用 run.py 启完整服务") 

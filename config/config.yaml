@@ -1,7 +1,7 @@
 # 输入源配置
 source:
   # 输入类型: rtsp, image, images, video
-  type: "rtsp"
+  type: "images"
   
   # RTSP流配置
   rtsp:
@@ -27,7 +27,7 @@ source:
     fps: 30                               # 输出视频帧率
 
 model:
-  path: "model/model-gcc/best.pt"
+  path: "model/model-mj/best.pt"
   conf_thres: 0.2
 
 display:
