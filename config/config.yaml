@@ -1,11 +1,11 @@
 # 输入源配置
 source:
   # 输入类型: rtsp, image, images, video
-  type: "images"
+  type: "rtsp"
   
   # RTSP流配置
   rtsp:
-    url: "rtsp://223.85.203.115:554/rtp/34020000001110000072_34020000001320000003"
+    url: "rtsp://223.85.203.115:554/rtp/34020000001110000067_34020000001320000003"
     ffmpeg_options:
       - "?tcp"
   
@@ -27,7 +27,7 @@ source:
     fps: 30                               # 输出视频帧率
 
 model:
-  path: "model/model-mj/best.pt"
+  path: "model/model-gcc/best.pt"
   conf_thres: 0.2
 
 display:

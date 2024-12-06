@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 import base64
 import cv2
 import numpy as np
@@ -13,6 +14,7 @@ import uuid
 import threading
 from yolo_rtsp import MeekYolo
 import uvicorn
+import requests
 
 app = FastAPI(
     title="MeekYolo API",
@@ -20,8 +22,22 @@ app = FastAPI(
     docs_url=None  # 禁用默认的swagger UI
 )
 
-# 挂载静态文件
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# 配置CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 允许所有源，生产环境中应该限制具体的域名
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有方法
+    allow_headers=["*"],  # 允许所有头
+)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """全局异常处理"""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)}
+    )
 
 @app.get("/docs", response_class=HTMLResponse)
 async def custom_swagger_ui_html():
@@ -73,11 +89,11 @@ def decode_image(image_data: str, is_base64: bool) -> np.ndarray:
             return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         else:
             # 从URL读取图片
-            resp = requests.get(image_data)
+            resp = requests.get(image_data, verify=False)  # 添加verify=False以处理HTTPS
             img_array = np.frombuffer(resp.content, np.uint8)
             return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"图���解码失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"图片解码失败: {str(e)}")
 
 def encode_image(image: np.ndarray) -> str:
     """编码图片为base64"""
@@ -137,31 +153,34 @@ async def process_image_file(file: UploadFile, detector: MeekYolo) -> AnalysisRe
 @app.post("/analyze/image", response_model=List[AnalysisResult])
 async def analyze_image(request: ImageRequest):
     """分析单张或多张图片 (通过URL或base64)"""
-    detector = MeekYolo()
-    results = []
-    
-    for image_data in request.images:
-        # 解码图片
-        frame = decode_image(image_data, request.is_base64)
+    try:
+        detector = MeekYolo()
+        results = []
         
-        # 处理图片
-        detections = detector.process_frame(frame)
+        for image_data in request.images:
+            # 解码图片
+            frame = decode_image(image_data, request.is_base64)
+            
+            # 处理图片
+            detections = detector.process_frame(frame)
+            
+            # 绘制结果
+            processed_frame = detector.draw_results(frame, detections)
+            
+            # 编码处理后的图片
+            result_base64 = encode_image(processed_frame)
+            
+            # 格式化检测结果
+            formatted_detections = format_detections(detections)
+            
+            results.append(AnalysisResult(
+                image_base64=result_base64,
+                detections=formatted_detections
+            ))
         
-        # 绘制结果
-        processed_frame = detector.draw_results(frame, detections)
-        
-        # 编码处理后的图片
-        result_base64 = encode_image(processed_frame)
-        
-        # 格式化检测结果
-        formatted_detections = format_detections(detections)
-        
-        results.append(AnalysisResult(
-            image_base64=result_base64,
-            detections=formatted_detections
-        ))
-    
-    return results
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/analyze/image/upload", response_model=List[AnalysisResult])
 async def analyze_uploaded_images(
@@ -262,6 +281,11 @@ async def stop_rtsp_analysis(task_id: str):
     del rtsp_tasks[task_id]
     
     return {"message": "分析已停止"}
+
+@app.get("/health")
+async def health_check():
+    """健康检查接口"""
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     print("请使用 run.py 启动完整服务") 
