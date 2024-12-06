@@ -1,9 +1,5 @@
 # MeekYolo 目标检测与跟踪系统
 
-bash
-
-pip install -r requirements.txt
-
 ## 项目介绍
 
 MeekYolo是一个基于YOLOv11的目标检测与跟踪系统，支持多种输入源（RTSP流、单张图片、批量图片、视频文件），可以进行实时目标检测、目标跟踪，并提供丰富的可视化配置选项。
@@ -69,8 +65,7 @@ MeekYolo是一个基于YOLOv11的目标检测与跟踪系统，支持多种输�
 
 ### 1. RTSP流检测
 
-```json
-yaml
+```yaml
 source:
 type: "rtsp"
 rtsp:
@@ -81,8 +76,7 @@ ffmpeg_options:
 
 ### 2. 单张图片检测
 
-```json
-yaml
+```yaml
 source:
 type: "image"
 image:
@@ -92,8 +86,7 @@ save_path: "results/test_result.jpg"
 
 ### 3. 批量图片检测
 
-```json
-yaml
+```yaml
 source:
 type: "images"
 images:
@@ -104,8 +97,7 @@ formats: [".jpg", ".jpeg", ".png"]
 
 ### 4. 视频文件检测
 
-```json
-yaml
+```yaml
 source:
 type: "video"
 video:
@@ -118,16 +110,14 @@ fps: 30
 
 ### 1. 输入源配置 (source)
 
-```json
-yaml
+```yaml
 source:
 type: "rtsp"/"image"/"images"/"video" # 输入源类型
 ```
 
 ### 2. 模型配置 (model)
 
-```json
-yaml
+```yaml
 model:
 path: "model/best.pt" # 模型路径
 conf_thres: 0.5 # 置信度阈值
@@ -135,8 +125,7 @@ conf_thres: 0.5 # 置信度阈值
 
 ### 3. 显示配置 (display)
 
-```json
-yaml
+```yaml
 display:
 window_name: "MeekYolo" # 窗口名称
 show_fps: true # 是否显示FPS
@@ -144,8 +133,7 @@ show_fps: true # 是否显示FPS
 
 ### 4. 控制台输出配置 (console)
 
-```json
-yaml
+```yaml
 console:
 enabled: false # 是否启用控制台输出
 show_time: false # 显示时间戳
@@ -156,8 +144,7 @@ show_separator: false # 显示分隔线
 
 ### 5. 可视化配置 (visualization)
 
-```json
-yaml
+```yaml
 visualization:
 show_box: true # 显示目标框
 show_class: true # 显示类别
@@ -179,8 +166,7 @@ background: [0,0,0] # 背景颜色
 
 ### 6. 跟踪配置 (tracking)
 
-```json
-yaml
+```yaml
 tracking:
 enabled: true # 是否启用跟踪
 persist: true # 是否保持ID
@@ -188,8 +174,7 @@ persist: true # 是否保持ID
 
 ### 7. 打印控制 (print)
 
-```json
-yaml
+```yaml
 print:
 enabled: false # 是否允许任何打印输出
 ```
