@@ -1,0 +1,8 @@
+path: ''
+train: images/train
+val: images/val
+nc: 3
+names:
+  0: 渣土车
+  1: 挖掘机
+  2: 吊车

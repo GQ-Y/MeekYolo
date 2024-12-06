@@ -27,30 +27,30 @@ source:
     fps: 30                               # 输出视频帧率
 
 model:
-  path: "model/best.pt"
-  conf_thres: 0.1
+  path: "model/model-gcc/best.pt"
+  conf_thres: 0.2
 
 display:
   window_name: "MeekYolo Detection"
-  show_fps: false
-  show_window: false  # 是否显示分析画面
+  show_fps: true
+  show_window: true  # 是否显示分析画面
 
 console:
-  enabled: false
-  show_time: false
-  show_total: false
-  show_details: false
-  show_separator: false
+  enabled: true
+  show_time: true
+  show_total: true
+  show_details: true
+  show_separator: true
 
 visualization:
-  show_box: false
-  show_class: false
-  show_track_id: false
-  show_confidence: false
-  show_position: false
-  show_size: false
-  show_anchor: false
-  show_line: false
+  show_box: true
+  show_class: true
+  show_track_id: true
+  show_confidence: true
+  show_position: true
+  show_size: true
+  show_anchor: true
+  show_line: true
 
   style:
     font_scale: 0.6
@@ -62,9 +62,9 @@ visualization:
       background: [0, 0, 0]
 
 tracking:
-  enabled: false
-  persist: false
+  enabled: true
+  persist: true
 
 # 打印控制
 print:
-  enabled: false        # 是否允许任何打印输出
+  enabled: true        # 是否允许任何打印输出

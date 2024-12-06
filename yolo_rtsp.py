@@ -53,12 +53,8 @@ class MeekYolo:
         # 初始化输入源
         self.initialize_source()
         
-        # 添加类别名称映射
-        self.names = {
-            0: '渣土车',
-            1: '挖掘机', 
-            2: '吊车'
-        }
+        # 从模型配置文件加载类别名称
+        self.load_class_names()
         
         # 加载中文字体
         self.font_path = '/System/Library/Fonts/PingFang.ttc'  # MacOS系统字体路径
@@ -208,7 +204,7 @@ class MeekYolo:
         # 保存结果
         cv2.imwrite(self.save_path, frame)
         if self.config['print']['enabled']:
-            print(f"果已保存至: {self.save_path}")
+            print(f"结果已保存至: {self.save_path}")
         
         self.running = False
 
@@ -435,7 +431,7 @@ class MeekYolo:
                 if text_bg_x1 < 0:
                     text_bg_x1 = max(0, x1 - margin - text_width - 2 * margin)
                     text_bg_x2 = max(0, x1 - margin)
-                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不下，就放到下面
+                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不��，就放到下面
                     text_bg_y2 = text_bg_y1 + info_height
             
             info_boxes.append((text_bg_x1, text_bg_y1, text_bg_x2, text_bg_y2))
@@ -498,7 +494,7 @@ start       - 开始分析
 stop        - 停止分析
 quit/exit   - 退出程序
 help        - 显示帮助信息
-status      - 显示当前状态
+status      - 显示前状态
 config      - 显示当前配置
 """)
 
@@ -622,6 +618,41 @@ config      - 显示当前配置
             if self.config['display']['show_window']:
                 cv2.destroyAllWindows()
 
+    def load_class_names(self):
+        """从模型配置文件加载类别名称"""
+        try:
+            # 获取模型目录路径
+            model_dir = os.path.dirname(self.config['model']['path'])
+            data_yaml_path = os.path.join(model_dir, 'data.yaml')
+            
+            # 读取data.yaml文件
+            with open(data_yaml_path, 'r', encoding='utf-8') as f:
+                data_config = yaml.safe_load(f)
+            
+            # 获取类别名称列表
+            names_dict = data_config.get('names', {})
+            
+            # 转换为字典格式 {index: name}
+            if isinstance(names_dict, list):
+                # 如果是列表格式，转换为字典
+                self.names = {i: name for i, name in enumerate(names_dict)}
+            elif isinstance(names_dict, dict):
+                # 如果已经是字典格式，直接使用
+                self.names = {int(k): v for k, v in names_dict.items()}
+            else:
+                raise ValueError("不支持的类别名称格式")
+            
+            if not self.names:
+                raise ValueError("未找到类别名称配置")
+                
+            print(f"成功加载类别名称: {self.names}")
+                
+        except Exception as e:
+            print(f"加载类别名称失败: {str(e)}")
+            # 使用默认类别名称作为后备
+            self.names = {
+                0: '未知类别'
+            }
+
 if __name__ == "__main__":
-    detector = MeekYolo()
-    detector.run() 
+    print("请使用 run.py 启动完整服务") 
