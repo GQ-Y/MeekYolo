@@ -1,0 +1,69 @@
+# 输入源配置
+source:
+  # 输入类型: rtsp, image, images, video
+  type: "video"
+  
+  # RTSP流配置
+  rtsp:
+    url: "rtsp://223.85.203.115:554/rtp/34020000001110000072_34020000001320000003"
+    ffmpeg_options:
+      - "?tcp"
+  
+  # 单图片配置
+  image:
+    path: "data/test.png"
+    save_path: "results/test_result.png"  # 处理结果保存路径
+  
+  # 多图片配置
+  images:
+    input_dir: "data/images"              # 输入图片文件夹
+    save_dir: "results/images"            # 结果保存文件夹
+    formats: [".jpg", ".jpeg", ".png"]    # 支持的图片格式
+  
+  # 视频文件配置
+  video:
+    path: "data/video/test2.mp4"
+    save_path: "results/video/test_result2.mp4"  # 处理结果保存路径
+    fps: 30                               # 输出视频帧率
+
+model:
+  path: "model/best.pt"
+  conf_thres: 0.1
+
+display:
+  window_name: "MeekYolo Detection"
+  show_fps: true
+
+console:
+  enabled: false
+  show_time: false
+  show_total: false
+  show_details: false
+  show_separator: false
+
+visualization:
+  show_box: true
+  show_class: true
+  show_track_id: true
+  show_confidence: true
+  show_position: true
+  show_size: true
+  show_anchor: true
+  show_line: true
+
+  style:
+    font_scale: 0.6
+    thickness: 2
+    chinese_text_size: 20
+    margin: 5
+    colors:
+      text: [255, 255, 255]
+      background: [0, 0, 0]
+
+tracking:
+  enabled: true
+  persist: true
+
+# 打印控制
+print:
+  enabled: false        # 是否允许任何打印输出
