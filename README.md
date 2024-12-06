@@ -39,16 +39,14 @@ MeekYolo是一个基于YOLOv11的目标检测与跟踪系统，支持多种输�
 
 1. 创建虚拟环境：
 
-   ```json
-   bash
+   ```bash
    python -m venv venv
    source venv/bin/activate # Linux/Mac
    venv\Scripts\activate # Windows
    ```
 2. 安装依赖：
 
-   ```
-   bash
+   ```bash
    pip install -r requirements.txt
    ```
 
@@ -56,8 +54,7 @@ MeekYolo是一个基于YOLOv11的目标检测与跟踪系统，支持多种输�
 
 1. 配置config.yaml文件
 2. 运行程序：
-   ```
-   bash
+   ```bash
    python yolo_rtsp.py
    ```
 
