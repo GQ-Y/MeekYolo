@@ -57,6 +57,13 @@ MeekYolo是一个基于YOLOv11的目标检测与跟踪系统，支持多种输�
    ```bash
    python yolo_rtsp.py
    ```
+3. 输入命令控制程序：
+   - `start` - 开始分析
+   - `stop` - 停止分析
+   - `help` - 显示帮助信息
+   - `status` - 显示当前状态
+   - `config` - 显示当前配置
+   - `quit`/`exit` - 退出程序
 
 ## 使用说明
 
@@ -139,7 +146,7 @@ show_details: false # 显示详细信息
 show_separator: false # 显示分隔线
 ```
 
-### 5. 可视化配置 (visualization)
+### 5. ���视化配置 (visualization)
 
 ```yaml
 visualization:
@@ -194,6 +201,6 @@ enabled: false # 是否允许任何打印输出
 ## 更新日志
 
 - 2024.12.6: 初始版本发布
-  - 支持多种输入源
+  - 支��多种输入源
   - 添加目标跟踪功能
   - 完善可视化配置

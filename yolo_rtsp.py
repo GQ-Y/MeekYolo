@@ -10,6 +10,36 @@ from ultralytics.nn.tasks import DetectionModel
 from PIL import Image, ImageDraw, ImageFont
 import os
 import glob
+import threading
+import queue
+import sys
+from threading import Thread
+
+class CommandReader(Thread):
+    def __init__(self):
+        super().__init__()
+        self.queue = queue.Queue()
+        self.running = True
+        self.daemon = True  # 设置为守护线程
+
+    def run(self):
+        while self.running:
+            try:
+                command = input("请输入命令> ").strip()
+                if command:  # 只处理非空命令
+                    self.queue.put(command.lower())
+            except (EOFError, KeyboardInterrupt):
+                self.running = False
+                break
+
+    def stop(self):
+        self.running = False
+        # 清空队列
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                break
 
 class MeekYolo:
     def __init__(self, config_path='config/config.yaml'):
@@ -46,6 +76,15 @@ class MeekYolo:
         
         # 用于存储目标颜色映射
         self.id_colors = {}
+        
+        # 添加运行状态控制
+        self.running = False
+        # 添加分析线程
+        self.analysis_thread = None
+        # 加帧缓冲
+        self.current_frame = None
+        self.frame_ready = False
+        self.frame_lock = threading.Lock()
 
     def initialize_model(self):
         # 设置设备
@@ -116,7 +155,7 @@ class MeekYolo:
         max_retries = 3
         
         try:
-            while True:
+            while self.running:
                 ret, frame = self.cap.read()
                 if not ret:
                     if self.config['print']['enabled']:
@@ -135,63 +174,32 @@ class MeekYolo:
 
                 # 处理帧
                 results = self.process_frame(frame)
-                
-                # 只有在总开关和console开关都打开的情况下才打印检测结果
-                if self.config['print']['enabled'] and self.config['console']['enabled']:
-                    # 打印分隔线
-                    if self.config['console']['show_separator']:
-                        print("\n" + "="*50)
-                    
-                    # 打印时间
-                    if self.config['console']['show_time']:
-                        current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-                        print(f"时间: {current_time}")
-                    
-                    # 打印总目标数
-                    if self.config['console']['show_total']:
-                        print(f"检测到 {len(results)} 个目标")
-                    
-                    # 打印详细信息
-                    if self.config['console']['show_details'] and results:
-                        print("\n目标详情:")
-                        for i, (box, score, cls_name, track_id) in enumerate(results, 1):
-                            x1, y1, x2, y2 = map(int, box)
-                            width = x2 - x1
-                            height = y2 - y1
-                            print(f"\n目标 {i}:")
-                            print(f"  跟踪ID: {track_id}")
-                            print(f"  类型: {cls_name}")
-                            print(f"  位置: ({x1}, {y1}) - ({x2}, {y2})")
-                            print(f"  尺寸: {width}x{height} 像素")
-                            print(f"  置信度: {score:.4f}")
-                
-                # 绘制结果
                 frame = self.draw_results(frame, results)
                 
-                # 计算和显示FPS
+                # 计算FPS
                 if self.config['display']['show_fps']:
                     curr_time = time.time()
                     fps = 1 / (curr_time - prev_time)
                     prev_time = curr_time
                     cv2.putText(frame, f'FPS: {fps:.1f}', (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-                # 显示结果
-                cv2.imshow(self.config['display']['window_name'], frame)
                 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-                    
+                # 如果需要显示画面，则更新帧缓冲
+                if self.config['display']['show_window']:
+                    with self.frame_lock:
+                        self.current_frame = frame.copy()
+                        self.frame_ready = True
+                
         finally:
             self.cap.release()
-            cv2.destroyAllWindows()
+            print("\n分析已完成", flush=True)
 
     def process_image(self):
         """处理单张图片"""
         # 读取图片
         frame = cv2.imread(self.image_path)
         if frame is None:
-            raise Exception(f"无法读取图片: {self.image_path}")
+            raise Exception(f"法读取图片: {self.image_path}")
         
         # 处理图片
         results = self.process_frame(frame)
@@ -200,11 +208,14 @@ class MeekYolo:
         # 保存结果
         cv2.imwrite(self.save_path, frame)
         if self.config['print']['enabled']:
-            print(f"结果已保存至: {self.save_path}")
+            print(f"果已保存至: {self.save_path}")
+        
+        self.running = False
 
     def process_images(self):
         """处理多张图片"""
         total = len(self.image_files)
+        self.running = True
         for i, image_path in enumerate(self.image_files, 1):
             # 读取图片
             frame = cv2.imread(image_path)
@@ -225,6 +236,11 @@ class MeekYolo:
             cv2.imwrite(save_path, frame)
             if self.config['print']['enabled']:
                 print(f"处理进度: {i}/{total}, 保存: {save_path}")
+            
+            if not self.running:
+                break
+        
+        self.running = False
 
     def process_video(self):
         """处理视频文件"""
@@ -239,7 +255,7 @@ class MeekYolo:
         
         frame_count = 0
         try:
-            while True:
+            while self.running:  # 修改循环条件
                 ret, frame = self.cap.read()
                 if not ret:
                     break
@@ -258,14 +274,16 @@ class MeekYolo:
                 # 显示结果
                 cv2.imshow(self.config['display']['window_name'], frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self.running = False  # 修改退出方式
                     break
                     
         finally:
             if self.config['print']['enabled']:
-                print(f"\n视频处理完成，结果保存至: {self.save_path}")
+                print(f"\n视处理完成，结果保存至: {self.save_path}")
             self.cap.release()
             out.release()
             cv2.destroyAllWindows()
+            print("\n分析已完成")  # 添加完成提示
 
     def get_color(self, track_id):
         """为每个track_id生成唯一的颜色"""
@@ -397,16 +415,16 @@ class MeekYolo:
                 text_width = max(text_widths)
             else:
                 text_height = 20  # 默认高度
-                text_width = 100  # 默认宽度
+                text_width = 100  # 默宽度
             
             # 计算信息框的位置和大小 - 放置在目标框左侧
             info_height = (len(info_list) + 1) * (text_height + margin)  # +1 是为了类别信息
             text_bg_x2 = max(0, x1 - margin)  # 确保不会超出画面左边界
             text_bg_x1 = max(0, text_bg_x2 - text_width - 2 * margin)
-            text_bg_y1 = max(0, y1 + (y2 - y1 - info_height) // 2)  # 垂直居中
+            text_bg_y1 = max(0, y1 + (y2 - y1 - info_height) // 2)  # 直居中
             text_bg_y2 = min(frame.shape[0], text_bg_y1 + info_height)
             
-            # 检查重叠并调整位置
+            # 检查重并调整位置
             while any(self.check_overlap(
                 (text_bg_x1, text_bg_y1, text_bg_x2, text_bg_y2),
                 existing_box
@@ -434,7 +452,7 @@ class MeekYolo:
                 line_end = (x1, y1 + (y2 - y1) // 2)
                 cv2.line(frame, line_start, line_end, box_color, 1)
             
-            # 绘制文本信息
+            # 绘文本信息
             current_y = text_bg_y1 + margin
             
             # 绘制类别信息
@@ -462,7 +480,7 @@ class MeekYolo:
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
         
-        # 如果一个矩形在另一个矩形的上方或���方，则不重叠
+        # 如果一个矩形在另一个矩形的上或方，则不重叠
         if y2_1 < y1_2 or y2_2 < y1_1:
             return False
         
@@ -472,9 +490,137 @@ class MeekYolo:
         
         return True
 
+    @staticmethod
+    def print_help():
+        """打印帮助信息"""
+        print("""\n可用命令:
+start       - 开始分析
+stop        - 停止分析
+quit/exit   - 退出程序
+help        - 显示帮助信息
+status      - 显示当前状态
+config      - 显示当前配置
+""")
+
+    def print_status(self):
+        """打印当前状态"""
+        source_type = self.config['source']['type']
+        if source_type == 'rtsp':
+            source = self.config['source']['rtsp']['url']
+        elif source_type == 'image':
+            source = self.config['source']['image']['path']
+        elif source_type == 'images':
+            source = self.config['source']['images']['input_dir']
+        else:
+            source = self.config['source']['video']['path']
+        
+        print(f"""\n当前状态:
+输入类型: {source_type}
+输入源: {source}
+跟踪功能: {'启用' if self.config['tracking']['enabled'] else '禁用'}
+""")
+
+    def print_config(self):
+        """打印当前配置"""
+        print("\n\n当前配置:")
+        print(yaml.dump(self.config, allow_unicode=True))
+
     def run(self):
-        """启动处理"""
-        self.process_func() 
+        """交互式运行"""
+        print("\n欢迎使用 MeekYolo 目标检测与跟踪系统")
+        print("输入 'help' 查看可用命令")
+        
+        # 如果需要显示画面，则创建窗口
+        if self.config['display']['show_window']:
+            cv2.namedWindow(self.config['display']['window_name'])
+        
+        # 启动命令读取线程
+        command_reader = CommandReader()
+        command_reader.start()
+        
+        running = True  # 添加主循环控制标志
+        try:
+            while running:
+                # 检查是否有新帧需要显示
+                if self.running and self.config['display']['show_window']:
+                    with self.frame_lock:
+                        if self.frame_ready:
+                            cv2.imshow(self.config['display']['window_name'], self.current_frame)
+                            self.frame_ready = False
+                    
+                    # 处理键盘事件
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q'):
+                        print("检测到退出按键，正在停止分析...")
+                        self.running = False
+                        if self.analysis_thread:
+                            self.analysis_thread.join()
+                        print("分析已停止")
+                
+                # 处理命令输入
+                try:
+                    command = command_reader.queue.get_nowait()
+                    
+                    if command in ['quit', 'exit']:
+                        print("正在退出程序...")
+                        self.running = False
+                        if self.analysis_thread:
+                            self.analysis_thread.join()
+                        running = False  # 设置主循环退出标志
+                        command_reader.stop()  # 停止命令读取线程
+                        return  # 直接返回退出
+                    
+                    elif command == 'help':
+                        self.print_help()
+                        print("\n请输入命令> ", end='', flush=True)
+                    
+                    elif command == 'status':
+                        self.print_status()
+                        print("\n请输入命令> ", end='', flush=True)
+                    
+                    elif command == 'config':
+                        self.print_config()
+                        print("\n请输入命令> ", end='', flush=True)
+                    
+                    elif command == 'start':
+                        if self.running:
+                            print("分析已在运行中")
+                            print("\n请输入命令> ", end='', flush=True)
+                        else:
+                            print("开始分析...")
+                            self.running = True
+                            # 在新线程中运行分析
+                            self.analysis_thread = threading.Thread(target=self.process_func)
+                            self.analysis_thread.start()
+                            print("\n请输入命令> ", end='', flush=True)
+                            
+                    elif command == 'stop':
+                        if not self.running:
+                            print("分析未在运行")
+                            print("\n请输入命令> ", end='', flush=True)
+                        else:
+                            print("正在停止分析...")
+                            self.running = False
+                            if self.analysis_thread:
+                                self.analysis_thread.join()
+                            print("分析已停止", flush=True)
+                            print("\n请输入命令> ", end='', flush=True)
+                        
+                    else:
+                        print(f"未知命令: {command}")
+                        print("输入 'help' 查看可用命令")
+                        print("\n请输入命令> ", end='', flush=True)
+                    
+                except queue.Empty:
+                    pass
+                    
+        finally:
+            # 停止命令读取线程
+            command_reader.stop()
+            command_reader.join()
+            # 清理资源
+            if self.config['display']['show_window']:
+                cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     detector = MeekYolo()

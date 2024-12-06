@@ -1,7 +1,7 @@
 # 输入源配置
 source:
   # 输入类型: rtsp, image, images, video
-  type: "video"
+  type: "rtsp"
   
   # RTSP流配置
   rtsp:
@@ -32,7 +32,8 @@ model:
 
 display:
   window_name: "MeekYolo Detection"
-  show_fps: true
+  show_fps: false
+  show_window: false  # 是否显示分析画面
 
 console:
   enabled: false
@@ -42,14 +43,14 @@ console:
   show_separator: false
 
 visualization:
-  show_box: true
-  show_class: true
-  show_track_id: true
-  show_confidence: true
-  show_position: true
-  show_size: true
-  show_anchor: true
-  show_line: true
+  show_box: false
+  show_class: false
+  show_track_id: false
+  show_confidence: false
+  show_position: false
+  show_size: false
+  show_anchor: false
+  show_line: false
 
   style:
     font_scale: 0.6
@@ -61,8 +62,8 @@ visualization:
       background: [0, 0, 0]
 
 tracking:
-  enabled: true
-  persist: true
+  enabled: false
+  persist: false
 
 # 打印控制
 print:
