@@ -1,10 +1,10 @@
 callback:
-  enabled: false
+  enabled: true
   retry:
     max_retries: 10
     retry_delay: 1.0
     timeout: 10
-  url: 127.0.0.1:8081
+  url: http://127.0.0.1:8081
 console:
   enabled: true
   show_details: true
@@ -19,7 +19,7 @@ environment:
   enable_gui: true
   is_docker: false
 model:
-  conf_thres: 0.2
+  conf_thres: 0.01
   path: model/model-gcc/best.pt
 model_management:
   model_config_template:
@@ -51,7 +51,7 @@ source:
   rtsp:
     ffmpeg_options:
     - ?tcp
-    url: 
+    url: null
   type: rtsp
   video:
     fps: 30
@@ -83,3 +83,10 @@ visualization:
     font_scale: 0.6
     margin: 5
     thickness: 2
+zlmediakit:
+  enabled: true
+  host: http://localhost:8000
+  rtsp:
+    port: 8554
+    tcp_mode: true
+  secret: 035c73f7-bb6b-4889-a715-d9eb2d1925cc

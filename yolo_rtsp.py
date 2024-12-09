@@ -18,6 +18,10 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 import base64
+from utils.rtsp_proxy import RTSPProxy
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CommandReader(Thread):
     def __init__(self):
@@ -190,6 +194,7 @@ class RtspFrameReader:
 
 class MeekYolo:
     def __init__(self, config_path='config/config.yaml'):
+        logger.info("初始化YOLO检测器")
         # 加载配置
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -240,7 +245,8 @@ class MeekYolo:
         # 添加回调函数属性
         self.callback_func = None
         self.task_id = None  # 添加任务ID性
-
+        self.rtsp_proxy = RTSPProxy()
+        
     def initialize_model(self):
         # 设置设备
         self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
@@ -261,43 +267,8 @@ class MeekYolo:
         source_type = self.config['source']['type']
         
         if source_type == 'rtsp':
-            self.process_func = self.process_rtsp
-            rtsp_url = self.config['source']['rtsp']['url']
-            
-            # 添加重试逻辑
-            max_retries = 3
-            retry_count = 0
-            success = False
-            
-            while retry_count < max_retries and not success:
-                try:
-                    print(f"\n尝试初始化 RTSP 流 (尝试 {retry_count + 1}/{max_retries}):")
-                    print(f"URL: {rtsp_url}")
-                    
-                    self.cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                    if not self.cap.isOpened():
-                        raise Exception("无法打开RTSP流")
-                    
-                    # 测试读取一帧
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        raise Exception("无法读取视频帧")
-                    
-                    # 如果成功读取帧，设置成功标志
-                    success = True
-                    print("RTSP 流初始化成功")
-                    
-                except Exception as e:
-                    print(f"初始化失败: {str(e)}")
-                    if self.cap is not None:
-                        self.cap.release()
-                    
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        print(f"等待 2 秒后重试...")
-                        time.sleep(2)
-                    else:
-                        raise Exception(f"RTSP 流初始化失败，已重试 {max_retries} 次")
+            # 不在这里始化RTSP流，而是在process_rtsp中处理
+            self.process_func = None
             
         elif source_type == 'image':
             self.process_func = self.process_image
@@ -325,91 +296,125 @@ class MeekYolo:
             self.output_fps = self.config['source']['video']['fps']
             # 确保保存路径存在
             os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
-            self.cap = cv2.VideoCapture(self.video_path)
-            if not self.cap.isOpened():
-                raise Exception("无法打开视频文件")
+            
         else:
             raise ValueError(f"不支持的输入类型: {source_type}")
 
-    async def process_rtsp(self):
+    async def process_rtsp(self, rtsp_url: str):
         """处理RTSP流"""
-        retry_count = 0
-        max_retries = 3
-        self.running = True
-        
+        cap = None
         try:
+            # 确保URL是字符串
+            if not isinstance(rtsp_url, str):
+                raise ValueError("RTSP URL must be a string")
+            
+            # 设置FFMPEG参数以优化RTSP流接收
+            rtsp_url += "?rtsp_transport=tcp"  # 强制使用TCP
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+            
+            # 设置缓冲区参数
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # 设置缓冲区大小
+            
+            # 设置FFMPEG特定参数
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('H', '2', '6', '4'))
+            cap.set(cv2.CAP_PROP_FPS, 25)  # 设置期望的帧率
+            
+            if not cap.isOpened():
+                raise Exception(f"无法打开RTSP流: {rtsp_url}")
+            
+            self.running = True
+            logger.info(f"开始处理RTSP流: {rtsp_url}")
+            self.last_callback = time.time()
+            
+            consecutive_errors = 0  # 连续错误计数
+            max_consecutive_errors = 5  # 最大连续错误次数
+            
             while self.running:
-                if not hasattr(self, 'cap') or not self.cap.isOpened():
-                    # 重新初始化连接
-                    if retry_count >= max_retries:
-                        raise Exception("重试次数超过上限,退出程序")
+                try:
+                    ret, frame = cap.read()
+                    if not ret:
+                        consecutive_errors += 1
+                        logger.warning(f"读取帧失败 ({consecutive_errors}/{max_consecutive_errors})")
+                        if consecutive_errors >= max_consecutive_errors:
+                            raise Exception("连续多次读取帧失败")
+                        await asyncio.sleep(0.1)
+                        continue
                     
-                    print(f"\n重新初始化 RTSP 连接 (重试 {retry_count + 1}/{max_retries})")
-                    self.initialize_source()
-                    retry_count += 1
-                    continue
-                
-                ret, frame = self.cap.read()
-                if not ret:
-                    print("读取帧失败，尝试重新连接")
-                    self.cap.release()
-                    await asyncio.sleep(1)
-                    continue
-                
-                retry_count = 0  # 重置重试计数
-                
-                # 处理帧
-                results = self.process_frame(frame)
-                
-                # 检查是否需要发送回调
-                current_time = datetime.now()
-                if results and self.callback_func and \
-                   (not hasattr(self, 'last_callback_time') or 
-                    (current_time - self.last_callback_time).total_seconds() >= self.callback_interval):
+                    consecutive_errors = 0  # 重置错误计数
                     
-                    try:
-                        # 绘制结果
-                        result_frame = self.draw_results(frame.copy(), results)
-                        
-                        # 生成时间戳文件名
-                        timestamp = current_time.strftime("%Y%m%d_%H%M%S_%f")
-                        image_filename = f"{timestamp}.jpg"
-                        image_path = os.path.join("results", "images", self.task_id, image_filename)
-                        os.makedirs(os.path.dirname(image_path), exist_ok=True)
-                        
-                        # 保存图片
-                        cv2.imwrite(image_path, result_frame)
-                        
-                        # 转换为base64
-                        _, buffer = cv2.imencode('.jpg', result_frame)
-                        image_base64 = base64.b64encode(buffer).decode('utf-8')
-                        
-                        # 发送回调
-                        formatted_results = self.format_detections(results)
-                        await self.callback_func(self.task_id, {
-                            "timestamp": current_time.isoformat(),
-                            "detections": formatted_results,
-                            "image_base64": image_base64,
-                            "image_path": image_path,
-                            "image_filename": image_filename
-                        })
-                        
-                        self.last_callback_time = current_time
-                        
-                    except Exception as e:
-                        print(f"处理回调时发生错误: {str(e)}")
+                    # 处理帧
+                    results = self.process_frame(frame)
+                    
+                    # 回调处理结果
+                    if self.callback_func and time.time() - self.last_callback >= self.callback_interval:
+                        try:
+                            # 格式化结果
+                            formatted_results = self.format_detections(results)
+                            # 生成时间戳
+                            timestamp = datetime.now()
+                            
+                            # 如果需要保存图片
+                            if self.config['visualization']['show_box']:
+                                # 绘制结果
+                                result_frame = self.draw_results(frame.copy(), results)
+                                # 生成文件名
+                                image_filename = f"{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+                                image_path = os.path.join("results", "images", self.task_id, image_filename)
+                                os.makedirs(os.path.dirname(image_path), exist_ok=True)
+                                
+                                # 保存图片
+                                cv2.imwrite(image_path, result_frame)
+                                
+                                # 转换为base64
+                                _, buffer = cv2.imencode('.jpg', result_frame)
+                                image_base64 = base64.b64encode(buffer).decode('utf-8')
+                            else:
+                                image_path = None
+                                image_base64 = None
+                            
+                            # 添加调试日志
+                            logger.info(f"检测到 {len(formatted_results)} 个目标")
+                            
+                            # 发送回调
+                            callback_data = {
+                                "task_id": self.task_id,
+                                "timestamp": timestamp.isoformat(),
+                                "detections": formatted_results,
+                                "image_base64": image_base64,
+                                "image_path": image_path
+                            }
+                            
+                            # 添加调试日志
+                            logger.info(f"准备发送回调: {callback_data}")
+                            
+                            # 执行回调
+                            await self.callback_func(callback_data)
+                            
+                            # 更新最后回调时间
+                            self.last_callback = time.time()
+                            
+                        except Exception as callback_error:
+                            logger.error(f"回调执行异常: {str(callback_error)}")
                 
-                await asyncio.sleep(0.001)  # 避免CPU占用过高
+                    # 控制处理速度
+                    await asyncio.sleep(0.01)  # 避免CPU占用过高
+                    
+                except cv2.error as e:
+                    logger.error(f"OpenCV错误: {str(e)}")
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        raise
+                    await asyncio.sleep(0.1)
+                    continue
                 
         except Exception as e:
-            print(f"RTSP处理错误: {str(e)}")
+            logger.error(f"处理RTSP流异常: {str(e)}")
             raise
             
         finally:
             self.running = False
-            if hasattr(self, 'cap'):
-                self.cap.release()
-            cv2.destroyAllWindows()
+            if cap is not None:
+                cap.release()
 
     def process_image(self):
         """处理单张图片"""
@@ -444,7 +449,7 @@ class MeekYolo:
             else:
                 stable_count = 0
             
-            # 如果连续两次检测结果稳定，认为已检测到目标
+            # 如果连续两次检测结果稳定，认为检测到目标
             if stable_count >= 2:
                 break
             
@@ -474,7 +479,7 @@ class MeekYolo:
         total = len(self.image_files)
         self.running = True
         for i, image_path in enumerate(self.image_files, 1):
-            # 读取图片
+            # 取图片
             frame = cv2.imread(image_path)
             if frame is None:
                 if self.config['print']['enabled']:
@@ -558,7 +563,7 @@ class MeekYolo:
     def get_color(self, track_id):
         """为每个track_id生成唯一颜色"""
         if track_id not in self.id_colors:
-            # 生成随机颜色,但排��接近黑色和白色的颜色
+            # 生成随机颜色,但排除接近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
             self.id_colors[track_id] = color
         return self.id_colors[track_id]
@@ -615,17 +620,17 @@ class MeekYolo:
         # 创建字体对象
         font = ImageFont.truetype(self.font_path, textSize)
         
-        # 创建绘制对
+        # 创建绘制对象
         draw = ImageDraw.Draw(img)
         
-        # 绘文本
+        # 绘制文本
         draw.text(position, text, textColor, font=font)
         
         # 转换回OpenCV格式
         return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
 
     def draw_results(self, frame, results):
-        # 样式配置
+        # 式配置
         style = self.config['visualization']['style']
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = style['font_scale']
@@ -670,7 +675,7 @@ class MeekYolo:
                 info_list.append(f"Size: {x2-x1}x{y2-y1}")
             
             if not info_list and not self.config['visualization']['show_class']:
-                continue  # 如果没有任何信息需要显示，直接跳过
+                continue  # 如果���有任何信息需要显示，直接跳过
             
             # 计算文本大小
             text_heights = []
@@ -705,12 +710,12 @@ class MeekYolo:
                 if text_bg_x1 < 0:
                     text_bg_x1 = max(0, x1 - margin - text_width - 2 * margin)
                     text_bg_x2 = max(0, x1 - margin)
-                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不，就放到下面
+                    text_bg_y1 = text_bg_y2 + margin  # 如果左边放不，就到下面
                     text_bg_y2 = text_bg_y1 + info_height
             
             info_boxes.append((text_bg_x1, text_bg_y1, text_bg_x2, text_bg_y2))
             
-            # 绘制信息框背景
+            # 绘制信框背景
             cv2.rectangle(frame, 
                          (text_bg_x1, text_bg_y1), 
                          (text_bg_x2, text_bg_y2), 
@@ -786,7 +791,7 @@ config      - 显示当前配置
         
         print(f"""\n当前状态:
 输入类型: {source_type}
-输入源: {source}
+输入: {source}
 跟踪功能: {'启用' if self.config['tracking']['enabled'] else '禁用'}
 """)
 
@@ -834,7 +839,7 @@ config      - 显示当前配置
             print(f"成功加载类别名称: {self.names}")
                 
         except Exception as e:
-            print(f"加载类别名称失败: {str(e)}")
+            print(f"加类别名称失败: {str(e)}")
             # 使用默认类别名称作为后备
             self.names = {
                 0: '未知类别'
@@ -845,7 +850,7 @@ config      - 显示当前配置
         self.callback_func = callback_func
 
     def format_detections(self, results):
-        """格式化检测结果为字典格式"""
+        """格式化��测结果为字典格式"""
         formatted = []
         for box, score, cls_name, track_id in results:
             x1, y1, x2, y2 = map(int, box)

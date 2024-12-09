@@ -51,3 +51,5 @@ EXPOSE 8000
 
 # 设置入口点
 CMD ["python", "run.py"] 
+
+# macOS不需要这部分，因为我们使用本地动态库
