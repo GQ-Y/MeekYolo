@@ -19,7 +19,7 @@ environment:
   enable_gui: true
   is_docker: false
 model:
-  conf_thres: 0.01
+  conf_thres: 0.2
   path: model/model-gcc/best.pt
 model_management:
   model_config_template:
@@ -80,7 +80,7 @@ visualization:
       - 255
       - 255
       - 255
-    font_scale: 0.6
+    font_scale: 0.01
     margin: 5
     thickness: 2
 zlmediakit:

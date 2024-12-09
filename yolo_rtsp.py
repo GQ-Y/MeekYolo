@@ -42,7 +42,7 @@ class CommandReader(Thread):
 
     def stop(self):
         self.running = False
-        # 清空队列
+        # 清���队列
         while not self.queue.empty():
             try:
                 self.queue.get_nowait()
@@ -115,7 +115,7 @@ class RtspFrameReader:
                     
                 ret, frame = cap.read()
                 if not ret or frame is None:
-                    print(f"{decoder['name']} 解码器无法读取帧")
+                    print(f"{decoder['name']} 解码器无法���取帧")
                     cap.release()
                     continue
                 
@@ -267,7 +267,7 @@ class MeekYolo:
         source_type = self.config['source']['type']
         
         if source_type == 'rtsp':
-            # 不在这里始化RTSP流，而是在process_rtsp中处理
+            # 不在这里��始化RTSP流，而是在process_rtsp中处理
             self.process_func = None
             
         elif source_type == 'image':
@@ -326,7 +326,7 @@ class MeekYolo:
             logger.info(f"开始处理RTSP流: {rtsp_url}")
             self.last_callback = time.time()
             
-            consecutive_errors = 0  # 连续错误计数
+            consecutive_errors = 0  # ���续错误计数
             max_consecutive_errors = 5  # 最大连续错误次数
             
             while self.running:
@@ -350,11 +350,14 @@ class MeekYolo:
                         try:
                             # 格式化结果
                             formatted_results = self.format_detections(results)
-                            # 生成时间戳
-                            timestamp = datetime.now()
                             
-                            # 如果需要保存图片
-                            if self.config['visualization']['show_box']:
+                            # 只有当检测到目标时才保存图片
+                            image_path = None
+                            image_base64 = None
+                            if formatted_results:  # 移除 and self.config['visualization']['show_box']
+                                # 生成时间戳
+                                timestamp = datetime.now()
+                                
                                 # 绘制结果
                                 result_frame = self.draw_results(frame.copy(), results)
                                 # 生成文件名
@@ -368,20 +371,21 @@ class MeekYolo:
                                 # 转换为base64
                                 _, buffer = cv2.imencode('.jpg', result_frame)
                                 image_base64 = base64.b64encode(buffer).decode('utf-8')
+                                
+                                # 添加调试日志
+                                logger.info(f"检测到 {len(formatted_results)} 个目标，已保存图片: {image_path}")
+                                logger.info(f"目标详情: {formatted_results}")
                             else:
-                                image_path = None
-                                image_base64 = None
-                            
-                            # 添加调试日志
-                            logger.info(f"检测到 {len(formatted_results)} 个目标")
+                                logger.info("未检测到目标，跳过图片保存")
                             
                             # 发送回调
                             callback_data = {
                                 "task_id": self.task_id,
-                                "timestamp": timestamp.isoformat(),
+                                "timestamp": datetime.now().isoformat(),
                                 "detections": formatted_results,
                                 "image_base64": image_base64,
-                                "image_path": image_path
+                                "image_path": image_path,
+                                "has_detections": bool(formatted_results)  # 添加检测标志
                             }
                             
                             # 添加调试日志
@@ -449,7 +453,7 @@ class MeekYolo:
             else:
                 stable_count = 0
             
-            # 如果连续两次检测结果稳定，认为检测到目标
+            # 如果连续两次检测结果稳定认为检测到目标
             if stable_count >= 2:
                 break
             
@@ -563,7 +567,7 @@ class MeekYolo:
     def get_color(self, track_id):
         """为每个track_id生成唯一颜色"""
         if track_id not in self.id_colors:
-            # 生成随机颜色,但排除接近黑色和白色的颜色
+            # 生成随机颜色,但排除近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
             self.id_colors[track_id] = color
         return self.id_colors[track_id]
@@ -585,15 +589,25 @@ class MeekYolo:
             result = results[0]
             boxes = result.boxes
             
+            # 添加调试日志
+            logger.info(f"原始检测结果: {len(boxes)} 个目标")
+            logger.info(f"置信度阈值: {self.config['model']['conf_thres']}")
+            
             for box in boxes:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 conf = box.conf.item()
                 cls_idx = int(box.cls.item())
                 cls_name = self.names.get(cls_idx, '未知')
-                # 根据配置定是否获取跟踪ID
+                # 根据配定是否获取跟踪ID
                 track_id = int(box.id[0]) if (self.config['tracking']['enabled'] and box.id is not None) else -1
-                processed_results.append(([x1, y1, x2, y2], conf, cls_name, track_id))
                 
+                # 添加调试日志
+                logger.info(f"目标: {cls_name}, 置信度: {conf:.3f}, 位置: ({int(x1)},{int(y1)})-({int(x2)},{int(y2)})")
+                
+                processed_results.append(([x1, y1, x2, y2], conf, cls_name, track_id))
+        else:
+            logger.info("未检测到任何目标")
+            
         return processed_results
 
     def calculate_iou(self, box1, box2):
@@ -652,7 +666,7 @@ class MeekYolo:
                 box_color = self.get_color(track_id)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, thickness)
                 
-                # 根据配置决定是否显示锚
+                # 根据��置决定是否显示锚
                 if self.config['visualization']['show_anchor']:
                     anchor_size = 4
                     cv2.drawMarker(frame, (x1, y1), box_color, cv2.MARKER_CROSS, anchor_size, thickness)
@@ -675,7 +689,7 @@ class MeekYolo:
                 info_list.append(f"Size: {x2-x1}x{y2-y1}")
             
             if not info_list and not self.config['visualization']['show_class']:
-                continue  # 如果���有任何信息需要显示，直接跳过
+                continue  # 如果有任何信息需要显示，直接跳过
             
             # 计算文本大小
             text_heights = []
@@ -751,7 +765,7 @@ class MeekYolo:
         return frame
 
     def check_overlap(self, box1, box2):
-        """检查两个矩形是否重叠"""
+        """检查两矩形是否重叠"""
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
         
@@ -791,7 +805,7 @@ config      - 显示当前配置
         
         print(f"""\n当前状态:
 输入类型: {source_type}
-输入: {source}
+��入: {source}
 跟踪功能: {'启用' if self.config['tracking']['enabled'] else '禁用'}
 """)
 
@@ -839,7 +853,7 @@ config      - 显示当前配置
             print(f"成功加载类别名称: {self.names}")
                 
         except Exception as e:
-            print(f"加类别名称失败: {str(e)}")
+            print(f"加类别名失败: {str(e)}")
             # 使用默认类别名称作为后备
             self.names = {
                 0: '未知类别'
@@ -850,7 +864,7 @@ config      - 显示当前配置
         self.callback_func = callback_func
 
     def format_detections(self, results):
-        """格式化��测结果为字典格式"""
+        """格式化测结果为字典格式"""
         formatted = []
         for box, score, cls_name, track_id in results:
             x1, y1, x2, y2 = map(int, box)
