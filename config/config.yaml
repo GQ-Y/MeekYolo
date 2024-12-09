@@ -1,3 +1,8 @@
+# 环境配置
+environment:
+  is_docker: false  # 是否在Docker环境中运行
+  enable_gui: true  # 是否启用GUI显示（在Docker环境中会被自动禁用）
+
 # 输入源配置
 source:
   # 输入类型: rtsp, image, images, video
@@ -28,12 +33,12 @@ source:
 
 model:
   path: "model/model-gcc/best.pt"
-  conf_thres: 0.2
+  conf_thres: 0.5
 
 display:
   window_name: "MeekYolo Detection"
   show_fps: true
-  show_window: true  # 是否显示分析画面
+  show_window: true  # 在Docker环境中会被自动禁用
 
 console:
   enabled: true
@@ -68,3 +73,12 @@ tracking:
 # 打印控制
 print:
   enabled: true        # 是否允许任何打印输出
+
+# 添加回调配置
+callback:
+  enabled: false  # 是否启用回调
+  url: '127.0.0.1:8081'   # 默认回调地址
+  retry:
+    max_retries: 10       # 最大重试次数
+    retry_delay: 1.0      # 重试间隔（秒）
+    timeout: 10           # 请求超时时间（秒）

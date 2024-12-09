@@ -14,6 +14,8 @@ import threading
 import queue
 import sys
 from threading import Thread
+import asyncio
+from datetime import datetime
 
 class CommandReader(Thread):
     def __init__(self):
@@ -46,6 +48,14 @@ class MeekYolo:
         # 加载配置
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
+        
+        # 检查是否在Docker环境中运行
+        self.is_docker = os.environ.get('DOCKER_ENV', '').lower() == 'true'
+        if self.is_docker:
+            # 在Docker环境中强制禁用GUI
+            self.config['environment']['is_docker'] = True
+            self.config['environment']['enable_gui'] = False
+            self.config['display']['show_window'] = False
             
         # 初始化模型
         self.initialize_model()
@@ -81,6 +91,10 @@ class MeekYolo:
         self.current_frame = None
         self.frame_ready = False
         self.frame_lock = threading.Lock()
+        
+        # 添加回调函数属性
+        self.callback_func = None
+        self.task_id = None  # 添加任务ID属性
 
     def initialize_model(self):
         # 设置设备
@@ -143,52 +157,61 @@ class MeekYolo:
         else:
             raise ValueError(f"不支持的输入类型: {source_type}")
 
-    def process_rtsp(self):
+    async def process_rtsp(self):
         """处理RTSP流"""
-        fps = 0
-        prev_time = time.time()
         retry_count = 0
         max_retries = 3
+        self.running = True
         
         try:
             while self.running:
                 ret, frame = self.cap.read()
                 if not ret:
-                    if self.config['print']['enabled']:
-                        print(f"无法读取视频帧,尝试重新连 ({retry_count + 1}/{max_retries})")
-                    retry_count += 1
                     if retry_count >= max_retries:
-                        if self.config['print']['enabled']:
-                            print("重试次数超过上限,退出程序")
-                        break
+                        raise Exception("重试次数超过上限,退出程序")
+                    retry_count += 1
+                    await asyncio.sleep(2)  # 使用异步睡眠
                     self.cap.release()
-                    time.sleep(2)
-                    self.cap = cv2.VideoCapture(self.config['source']['rtsp']['url'], cv2.CAP_FFMPEG)
+                    self.cap = cv2.VideoCapture(self.config['source']['rtsp']['url'])
                     continue
                 
                 retry_count = 0
-
+                
                 # 处理帧
                 results = self.process_frame(frame)
-                frame = self.draw_results(frame, results)
                 
-                # 计算FPS
-                if self.config['display']['show_fps']:
-                    curr_time = time.time()
-                    fps = 1 / (curr_time - prev_time)
-                    prev_time = curr_time
-                    cv2.putText(frame, f'FPS: {fps:.1f}', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                # 如果检测到目标且设置了回调函数，立即发送结果
+                if results and self.callback_func:
+                    formatted_results = self.format_detections(results)
+                    # 创建异步任务发送结果
+                    await self.callback_func(self.task_id, {
+                        "timestamp": datetime.now().isoformat(),
+                        "detections": formatted_results
+                    })
                 
-                # 如果需要显示画面，则更新帧缓冲
-                if self.config['display']['show_window']:
-                    with self.frame_lock:
-                        self.current_frame = frame.copy()
-                        self.frame_ready = True
+                # 如果启用了RTMP输出
+                if self.config.get('output', {}).get('enabled'):
+                    frame = self.draw_results(frame, results)
+                    # TODO: 添加RTMP推流逻辑
                 
+                # 短暂休眠，避免CPU占用过高
+                await asyncio.sleep(0.01)
+                
+        except Exception as e:
+            print(f"RTSP处理错误: {str(e)}")
+            # 发送错误通知
+            if self.callback_func and self.task_id:
+                await self.callback_func(self.task_id, {
+                    "status": "failed",
+                    "error": str(e)
+                })
+            raise
+        
         finally:
-            self.cap.release()
-            print("\n分析已完成", flush=True)
+            self.running = False
+            if hasattr(self, 'cap'):
+                self.cap.release()
+            cv2.destroyAllWindows()
 
     def process_image(self):
         """处理单张图片"""
@@ -223,7 +246,7 @@ class MeekYolo:
             else:
                 stable_count = 0
             
-            # 如果连续两次检测结果稳定，认为已检测到所有目标
+            # 如果连续两次检测结果稳定，认为已检测到有目标
             if stable_count >= 2:
                 break
             
@@ -278,32 +301,37 @@ class MeekYolo:
         
         self.running = False
 
-    def process_video(self):
-        """处理视频文件"""
-        # 获取视频信息
-        width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    def process_video(self, video_path: str, save_path: str, progress_callback=None):
+        """
+        处理视频文件
         
-        # 创建视频写入器
+        Args:
+            video_path: 输入视频路径或URL
+            save_path: 结果保存路径
+            progress_callback: 进度回调函数，接收一个float参数(0-1)
+        """
+        # 获取视频信息
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise Exception("无法打开视频文件")
+        
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        
+        # 建视频写入器
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(self.save_path, fourcc, self.output_fps, (width, height))
+        out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
         
         frame_count = 0
-        last_print_time = time.time()
         try:
-            while self.running:
-                ret, frame = self.cap.read()
+            while True:
+                ret, frame = cap.read()
                 if not ret:
                     break
                 
                 frame_count += 1
-                # 每秒只更新一次进度显示
-                current_time = time.time()
-                if self.config['print']['enabled'] and (current_time - last_print_time) >= 1.0:
-                    progress = (frame_count / total_frames) * 100
-                    print(f"\r处理进度: {frame_count}/{total_frames} ({progress:.1f}%)", end="", flush=True)
-                    last_print_time = current_time
                 
                 # 处理帧
                 results = self.process_frame(frame)
@@ -312,34 +340,25 @@ class MeekYolo:
                 # 写入结果
                 out.write(frame)
                 
-                # 显示结果
-                if self.config['display']['show_window']:
-                    # 缩放图片以减少内存使用
-                    display_frame = cv2.resize(frame, (width//2, height//2))
-                    cv2.imshow(self.config['display']['window_name'], display_frame)
+                # 回调进度
+                if progress_callback and total_frames > 0:
+                    progress = frame_count / total_frames
+                    progress_callback(progress)
                 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    self.running = False
-                    break
-                
-                # 释放一些内存
+                # 释放内存
                 del results
-                if 'display_frame' in locals():
-                    del display_frame
                 
         finally:
-            if self.config['print']['enabled']:
-                print(f"\n视频处理完成，结果保存至: {self.save_path}")
-            self.cap.release()
+            cap.release()
             out.release()
             cv2.destroyAllWindows()
-            # 强制进行垃圾回收
-            import gc
-            gc.collect()
-            print("\n分析已完成")
+            
+            # 确保最终进度为100%
+            if progress_callback:
+                progress_callback(1.0)
 
     def get_color(self, track_id):
-        """为每个track_id生成唯一的颜色"""
+        """为每个track_id生成唯一���颜色"""
         if track_id not in self.id_colors:
             # 生成随机颜色,但排除接近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
@@ -401,7 +420,7 @@ class MeekYolo:
         # 创建绘制对
         draw = ImageDraw.Draw(img)
         
-        # 绘制文本
+        # 绘文本
         draw.text(position, text, textColor, font=font)
         
         # 转换回OpenCV格式
@@ -470,7 +489,7 @@ class MeekYolo:
                 text_height = 20  # 默认高度
                 text_width = 100  # 默宽度
             
-            # 计算信息框的位置和大小 - 放置在目标框左侧
+            # 计算信息框的位置和大小 - 放置在目标左侧
             info_height = (len(info_list) + 1) * (text_height + margin)  # +1 是为了类别信息
             text_bg_x2 = max(0, x1 - margin)  # 确保不会超出画面左边界
             text_bg_x1 = max(0, text_bg_x2 - text_width - 2 * margin)
@@ -578,102 +597,14 @@ config      - 显示当前配置
         print("\n\n当前配置:")
         print(yaml.dump(self.config, allow_unicode=True))
 
-    def run(self):
-        """交互式运行"""
-        print("\n欢迎使用 MeekYolo 目标检测与跟踪系统")
-        print("输入 'help' 查看可用命令")
+    async def run(self):
+        """运行检测器"""
+        source_type = self.config['source']['type']
         
-        # 如果需要显示画面，则创建窗口
-        if self.config['display']['show_window']:
-            cv2.namedWindow(self.config['display']['window_name'])
-        
-        # 启动命令读取线程
-        command_reader = CommandReader()
-        command_reader.start()
-        
-        running = True  # 添加主循环控制标志
-        try:
-            while running:
-                # 检查是否有新帧需要显示
-                if self.running and self.config['display']['show_window']:
-                    with self.frame_lock:
-                        if self.frame_ready:
-                            cv2.imshow(self.config['display']['window_name'], self.current_frame)
-                            self.frame_ready = False
-                    
-                    # 处理键盘事件
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == ord('q'):
-                        print("检测到退出按键，正在停止分析...")
-                        self.running = False
-                        if self.analysis_thread:
-                            self.analysis_thread.join()
-                        print("分析已停止")
-                
-                # 处理命令输入
-                try:
-                    command = command_reader.queue.get_nowait()
-                    
-                    if command in ['quit', 'exit']:
-                        print("正在退出程序...")
-                        self.running = False
-                        if self.analysis_thread:
-                            self.analysis_thread.join()
-                        running = False  # 设置主循环退出标志
-                        command_reader.stop()  # 停止命令读取线程
-                        return  # 直接返回退出
-                    
-                    elif command == 'help':
-                        self.print_help()
-                        print("\n请输入命令> ", end='', flush=True)
-                    
-                    elif command == 'status':
-                        self.print_status()
-                        print("\n请输入命令> ", end='', flush=True)
-                    
-                    elif command == 'config':
-                        self.print_config()
-                        print("\n请输入命令> ", end='', flush=True)
-                    
-                    elif command == 'start':
-                        if self.running:
-                            print("分析已在运行中")
-                            print("\n请输入命令> ", end='', flush=True)
-                        else:
-                            print("开始分析...")
-                            self.running = True
-                            # 在新线程中运行分析
-                            self.analysis_thread = threading.Thread(target=self.process_func)
-                            self.analysis_thread.start()
-                            print("\n请输入命令> ", end='', flush=True)
-                            
-                    elif command == 'stop':
-                        if not self.running:
-                            print("分析未在运行")
-                            print("\n请输入命令> ", end='', flush=True)
-                        else:
-                            print("正在停止分析...")
-                            self.running = False
-                            if self.analysis_thread:
-                                self.analysis_thread.join()
-                            print("分析已停止", flush=True)
-                            print("\n请输入命令> ", end='', flush=True)
-                        
-                    else:
-                        print(f"未知命令: {command}")
-                        print("输入 'help' 查看可用命令")
-                        print("\n请输入命令> ", end='', flush=True)
-                    
-                except queue.Empty:
-                    pass
-                    
-        finally:
-            # 停止命令读取线程
-            command_reader.stop()
-            command_reader.join()
-            # 清理资源
-            if self.config['display']['show_window']:
-                cv2.destroyAllWindows()
+        if source_type == 'rtsp':
+            await self.process_rtsp()
+        else:
+            raise ValueError(f"不支持的输入类型: {source_type}")
 
     def load_class_names(self):
         """从模型配置文件加载类别名称"""
@@ -710,6 +641,39 @@ config      - 显示当前配置
             self.names = {
                 0: '未知类别'
             }
+
+    def set_callback(self, callback_func):
+        """设置检测结果回调函数"""
+        self.callback_func = callback_func
+
+    def format_detections(self, results):
+        """格式化检测结果为字典格式"""
+        formatted = []
+        for box, score, cls_name, track_id in results:
+            x1, y1, x2, y2 = map(int, box)
+            formatted.append({
+                "track_id": track_id,
+                "class": cls_name,
+                "confidence": float(score),
+                "bbox": {
+                    "x1": x1,
+                    "y1": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "width": x2 - x1,
+                    "height": y2 - y1
+                }
+            })
+        return formatted
+
+    def stop(self):
+        """停止处理"""
+        self.running = False
+
+    def set_task_info(self, task_id: str, callback_func=None):
+        """设置任务信息"""
+        self.task_id = task_id
+        self.callback_func = callback_func
 
 if __name__ == "__main__":
     print("请使用 run.py 启完整服务") 

@@ -146,7 +146,7 @@ show_details: false # 显示详细信息
 show_separator: false # 显示分隔线
 ```
 
-### 5. ���视化配置 (visualization)
+### 5. 可视化视化配置 (visualization)
 
 ```yaml
 visualization:

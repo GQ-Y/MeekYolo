@@ -1,31 +1,28 @@
 import os
 import requests
-from pathlib import Path
 
-def setup_static_files():
-    """设置静态文件"""
-    # 创建static目录
-    static_dir = Path("static")
-    static_dir.mkdir(exist_ok=True)
+def setup_swagger_ui():
+    """下载并设置Swagger UI文件"""
+    static_dir = "static"
+    if not os.path.exists(static_dir):
+        os.makedirs(static_dir)
     
-    # 定义需要下载的文件
+    # Swagger UI 必要文件列表
     files = {
-        "swagger-ui.css": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui.css",
-        "swagger-ui-bundle.js": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.11.0/swagger-ui-bundle.js",
-        "favicon.png": "https://fastapi.tiangolo.com/img/favicon.png"
+        "swagger-ui-bundle.js": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-bundle.js",
+        "swagger-ui.css": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui.css",
+        "swagger-ui-standalone-preset.js": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/swagger-ui-standalone-preset.js",
+        "favicon.png": "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.9.0/favicon-32x32.png"
     }
     
-    # 下载文件
     for filename, url in files.items():
-        file_path = static_dir / filename
-        if not file_path.exists():
-            print(f"下载 {filename}...")
+        filepath = os.path.join(static_dir, filename)
+        if not os.path.exists(filepath):
+            print(f"Downloading {filename}...")
             response = requests.get(url)
-            response.raise_for_status()
-            file_path.write_bytes(response.content)
-            print(f"{filename} 下载完成")
-        else:
-            print(f"{filename} 已存在")
+            with open(filepath, "wb") as f:
+                f.write(response.content)
+            print(f"Downloaded {filename}")
 
 if __name__ == "__main__":
-    setup_static_files() 
+    setup_swagger_ui() 

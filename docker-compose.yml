@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  yolo-detector:
+    image: yolo-detector:latest
+    container_name: yolo-detector
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENCV_VIDEOIO_PRIORITY_MSMF=0
+      - OPENCV_VIDEOIO_PRIORITY_V4L=100
+      - OPENCV_IO_ENABLE_OPENEXR=0
+      - DOCKER_ENV=true
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./model:/app/model 
