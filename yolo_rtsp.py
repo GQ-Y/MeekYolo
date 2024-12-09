@@ -301,7 +301,17 @@ class MeekYolo:
             raise ValueError(f"不支持的输入类型: {source_type}")
 
     async def process_rtsp(self, rtsp_url: str):
-        """处理RTSP流"""
+        """处理RTSP视频流
+        
+        Args:
+            rtsp_url (str): RTSP流地址，格式如：
+                - rtsp://username:password@ip:port/path
+                - rtsp://ip:port/path
+        
+        Raises:
+            ValueError: URL格式错误
+            Exception: 视频流打开失败或处理过程中的其他错误
+        """
         cap = None
         try:
             # 确保URL是字符串
@@ -326,7 +336,7 @@ class MeekYolo:
             logger.info(f"开始处理RTSP流: {rtsp_url}")
             self.last_callback = time.time()
             
-            consecutive_errors = 0  # ���续错误计数
+            consecutive_errors = 0  # 连续错误计数
             max_consecutive_errors = 5  # 最大连续错误次数
             
             while self.running:
@@ -345,47 +355,41 @@ class MeekYolo:
                     # 处理帧
                     results = self.process_frame(frame)
                     
-                    # 回调处理结果
-                    if self.callback_func and time.time() - self.last_callback >= self.callback_interval:
+                    # 格式化结果
+                    formatted_results = self.format_detections(results)
+                    
+                    # 只有检测到目标时才进行回调
+                    if formatted_results and self.callback_func and time.time() - self.last_callback >= self.callback_interval:
                         try:
-                            # 格式化结果
-                            formatted_results = self.format_detections(results)
+                            # 生成时间戳
+                            timestamp = datetime.now()
                             
-                            # 只有当检测到目标时才保存图片
-                            image_path = None
-                            image_base64 = None
-                            if formatted_results:  # 移除 and self.config['visualization']['show_box']
-                                # 生成时间戳
-                                timestamp = datetime.now()
-                                
-                                # 绘制结果
-                                result_frame = self.draw_results(frame.copy(), results)
-                                # 生成文件名
-                                image_filename = f"{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-                                image_path = os.path.join("results", "images", self.task_id, image_filename)
-                                os.makedirs(os.path.dirname(image_path), exist_ok=True)
-                                
-                                # 保存图片
-                                cv2.imwrite(image_path, result_frame)
-                                
-                                # 转换为base64
-                                _, buffer = cv2.imencode('.jpg', result_frame)
-                                image_base64 = base64.b64encode(buffer).decode('utf-8')
-                                
-                                # 添加调试日志
-                                logger.info(f"检测到 {len(formatted_results)} 个目标，已保存图片: {image_path}")
-                                logger.info(f"目标详情: {formatted_results}")
-                            else:
-                                logger.info("未检测到目标，跳过图片保存")
+                            # 绘制结果
+                            result_frame = self.draw_results(frame.copy(), results)
+                            # 生成文件名
+                            image_filename = f"{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+                            image_path = os.path.join("results", "images", self.task_id, image_filename)
+                            os.makedirs(os.path.dirname(image_path), exist_ok=True)
+                            
+                            # 保存图片
+                            cv2.imwrite(image_path, result_frame)
+                            
+                            # 转换为base64
+                            _, buffer = cv2.imencode('.jpg', result_frame)
+                            image_base64 = base64.b64encode(buffer).decode('utf-8')
+                            
+                            # 添加调试日志
+                            logger.info(f"检测到 {len(formatted_results)} 个目标，已保存图片: {image_path}")
+                            logger.info(f"目标详情: {formatted_results}")
                             
                             # 发送回调
                             callback_data = {
                                 "task_id": self.task_id,
-                                "timestamp": datetime.now().isoformat(),
+                                "timestamp": timestamp.isoformat(),
                                 "detections": formatted_results,
                                 "image_base64": image_base64,
                                 "image_path": image_path,
-                                "has_detections": bool(formatted_results)  # 添加检测标志
+                                "has_detections": True
                             }
                             
                             # 添加调试日志
@@ -527,7 +531,7 @@ class MeekYolo:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         
-        # 建频写入器
+        # 建频写入
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
         
@@ -567,12 +571,27 @@ class MeekYolo:
     def get_color(self, track_id):
         """为每个track_id生成唯一颜色"""
         if track_id not in self.id_colors:
-            # 生成随机颜色,但排除近黑色和白色的颜色
+            # 生成随机颜色,但排近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
             self.id_colors[track_id] = color
         return self.id_colors[track_id]
 
-    def process_frame(self, frame):
+    def process_frame(self, frame: np.ndarray) -> list:
+        """处理单帧图像
+        
+        Args:
+            frame (np.ndarray): OpenCV格式的图像数组，shape=(H,W,3)，BGR格式
+        
+        Returns:
+            list: 检测结果列表，每个元素为元组 (box, score, cls_name, track_id)
+                - box (list): [x1,y1,x2,y2] 边界框坐标
+                - score (float): 置信度分数
+                - cls_name (str): 目标类别名称
+                - track_id (int): 目标跟踪ID，如果未启用跟踪则为-1
+        """
+        # 添加原始图像信息
+        logger.info(f"处理图像: shape={frame.shape}")
+        
         # 根据配置决定是否使用跟踪
         if self.config['tracking']['enabled']:
             results = self.tracker(frame, 
@@ -583,6 +602,17 @@ class MeekYolo:
             results = self.tracker(frame, 
                                  conf=self.config['model']['conf_thres'],
                                  verbose=False)
+        
+        # 添加原始检测结果日志
+        if len(results) > 0:
+            result = results[0]
+            boxes = result.boxes
+            logger.info(f"YOLO检测结果: {len(boxes)} 个目标")
+            # 打印每个检测框的原始信息
+            for box in boxes:
+                logger.info(f"原始检测框: {box.xyxy[0]}, 置信度: {box.conf.item()}, 类别: {box.cls.item()}")
+        else:
+            logger.info("YOLO未检测到任何目标")
         
         processed_results = []
         if len(results) > 0:
@@ -666,7 +696,7 @@ class MeekYolo:
                 box_color = self.get_color(track_id)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, thickness)
                 
-                # 根据��置决定是否显示锚
+                # 根据配置决定是否显示锚
                 if self.config['visualization']['show_anchor']:
                     anchor_size = 4
                     cv2.drawMarker(frame, (x1, y1), box_color, cv2.MARKER_CROSS, anchor_size, thickness)
@@ -691,7 +721,7 @@ class MeekYolo:
             if not info_list and not self.config['visualization']['show_class']:
                 continue  # 如果有任何信息需要显示，直接跳过
             
-            # 计算文本大小
+            # 计文本大小
             text_heights = []
             text_widths = []
             for text in info_list:
@@ -744,7 +774,7 @@ class MeekYolo:
             # 绘制文本信息
             current_y = text_bg_y1 + margin
             
-            # 绘制类别信息
+            # 绘制��别信息
             if self.config['visualization']['show_class']:
                 frame = self.cv2AddChineseText(frame, 
                                              f"类型: {cls_name}",
@@ -769,7 +799,7 @@ class MeekYolo:
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
         
-        # 如果一个矩形在另一个矩形的上或方，则不重叠
+        # 如果一个矩形在另一个形的上或方，则不重叠
         if y2_1 < y1_2 or y2_2 < y1_1:
             return False
         
@@ -805,7 +835,7 @@ config      - 显示当前配置
         
         print(f"""\n当前状态:
 输入类型: {source_type}
-��入: {source}
+输入: {source}
 跟踪功能: {'启用' if self.config['tracking']['enabled'] else '禁用'}
 """)
 
@@ -863,8 +893,28 @@ config      - 显示当前配置
         """设置检测结果回调函数"""
         self.callback_func = callback_func
 
-    def format_detections(self, results):
-        """格式化测结果为字典格式"""
+    def format_detections(self, results: list) -> list:
+        """格式化检测结果为标准字典格式
+        
+        Args:
+            results (list): process_frame 返回的原始检测结果列表
+        
+        Returns:
+            list: 格式化后的检测结果列表，每个元素为字典：
+                {
+                    "track_id": int,      # 目标跟踪ID
+                    "class": str,         # 目标类别
+                    "confidence": float,  # 置信度分数
+                    "bbox": {             # 边界框信息
+                        "x1": int,        # 左上角x坐标
+                        "y1": int,        # 左上角y坐标
+                        "x2": int,        # 右下角x坐标
+                        "y2": int,        # 右下角y坐标
+                        "width": int,     # 宽度
+                        "height": int     # 高度
+                    }
+                }
+        """
         formatted = []
         for box, score, cls_name, track_id in results:
             x1, y1, x2, y2 = map(int, box)
@@ -888,7 +938,29 @@ config      - 显示当前配置
         self.running = False
 
     def set_task_info(self, task_id: str, callback_func=None, callback_interval: float = 1.0):
-        """设置任务信息"""
+        """设置任务信息和回调参数
+        
+        Args:
+            task_id (str): 任务唯一标识符，用于区分不同的分析任务
+            callback_func (Callable, optional): 回调函数，用于接收检测结果
+                回调函数格式: async def callback(data: dict)
+                data 参数包含:
+                    - task_id (str): 任务ID
+                    - timestamp (str): 检测时间，ISO格式
+                    - detections (List[dict]): 检测结���列表，每个检测包含:
+                        - track_id (int): 目标跟踪ID
+                        - class (str): 目标类别
+                        - confidence (float): 置信度
+                        - bbox (dict): 边界框信息
+                            - x1, y1 (int): 左上角坐标
+                            - x2, y2 (int): 右下角坐标
+                            - width, height (int): 宽度和高度
+                    - image_base64 (str): 检测结果图片的base64编码
+                    - image_path (str): 检测结果图片的保存路径
+                    - has_detections (bool): 是否检测到目标
+            callback_interval (float, optional): 回调间隔时间(秒)，默认1.0秒
+                用于控制回调频率，避免回调过于频繁
+        """
         self.task_id = task_id
         self.callback_func = callback_func
         self.callback_interval = callback_interval

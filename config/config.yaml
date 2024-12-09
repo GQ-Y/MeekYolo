@@ -1,92 +1,113 @@
+# 回调服务配置
 callback:
-  enabled: true
-  retry:
-    max_retries: 10
-    retry_delay: 1.0
-    timeout: 10
-  url: http://127.0.0.1:8081
+  enabled: true  # 是否启用回调功能
+  retry:  # 回调重试配置
+    max_retries: 10  # 最大重试次数
+    retry_delay: 1.0  # 重试间隔(秒)
+    timeout: 10  # 回调超时时间(秒)
+  url: http://127.0.0.1:8081  # 回调服务地址
+
+# 控制台输出配置
 console:
-  enabled: true
-  show_details: true
-  show_separator: true
-  show_time: true
-  show_total: true
+  enabled: true  # 是否启用控制台输出
+  show_details: true  # 显示详细信息
+  show_separator: true  # 显示分隔符
+  show_time: true  # 显示时间戳
+  show_total: true  # 显示总计信息
+
+# 显示配置
 display:
-  show_fps: true
-  show_window: true
-  window_name: MeekYolo Detection
+  show_fps: true  # 显示帧率
+  show_window: true  # 显示窗口
+  window_name: MeekYolo Detection  # 窗口标题
+
+# 环境配置
 environment:
-  enable_gui: true
-  is_docker: false
+  enable_gui: true  # 启用图形界面
+  is_docker: false  # 是否在Docker环境中运行
+
+# 模型配置
 model:
-  conf_thres: 0.2
-  path: model/model-gcc/best.pt
+  conf_thres: 0.01  # 目标检测置信度阈值(0-1)
+  path: model/model-gcc/best.pt  # 模型文件路径
+
+# 模型管理配置
 model_management:
-  model_config_template:
-    author: ''
-    code: ''
-    create_time: ''
-    description: ''
-    name: ''
-    update_time: ''
-    version: 1.0.0
-  model_dir: model
-  required_files:
-  - best.pt
-  - data.yaml
-  temp_dir: temp/models
+  model_config_template:  # 模型配置模板
+    author: ''  # 作者
+    code: ''  # 模型代码
+    create_time: ''  # 创建时间
+    description: ''  # 描述
+    name: ''  # 模型名称
+    update_time: ''  # 更新时间
+    version: 1.0.0  # 版本号
+  model_dir: model  # 模型目录
+  required_files:  # 必需的文件列表
+  - best.pt  # 模型权重文件
+  - data.yaml  # 数据配置文件
+  temp_dir: temp/models  # 临时目录
+
+# 打印配置
 print:
-  enabled: true
+  enabled: true  # 启用打印输出
+
+# 输入源配置
 source:
-  image:
-    path: data/test.png
-    save_path: results/test_result.png
-  images:
-    formats:
+  image:  # 单张图片配置
+    path: data/test.png  # 输入图片路径
+    save_path: results/test_result.png  # 结果保存路径
+  images:  # 批量图片配置
+    formats:  # 支持的图片格式
     - .jpg
     - .jpeg
     - .png
-    input_dir: data/images
-    save_dir: results/images
-  rtsp:
-    ffmpeg_options:
-    - ?tcp
-    url: null
-  type: rtsp
-  video:
-    fps: 30
-    path: data/video/test2.mp4
-    save_path: results/video/test_result2.mp4
+    input_dir: data/images  # 输入目录
+    save_dir: results/images  # 结果保存目录
+  rtsp:  # RTSP流配置
+    ffmpeg_options:  # FFmpeg选项
+    - ?tcp  # 使用TCP传输
+    url: null  # RTSP地址
+  type: rtsp  # 输入类型(rtsp/image/images/video)
+  video:  # 视频配置
+    fps: 30  # 帧率
+    path: data/video/test2.mp4  # 输入视频路径
+    save_path: results/video/test_result2.mp4  # 结果保存路径
+
+# 目标跟踪配置
 tracking:
-  enabled: true
-  persist: true
+  enabled: true  # 启用目标跟踪
+  persist: true  # 保持跟踪ID
+
+# 可视化配置
 visualization:
-  show_anchor: true
-  show_box: true
-  show_class: true
-  show_confidence: true
-  show_line: true
-  show_position: true
-  show_size: true
-  show_track_id: true
-  style:
-    chinese_text_size: 20
-    colors:
-      background:
+  show_anchor: true  # 显示锚点
+  show_box: true  # 显示边界框
+  show_class: true  # 显示类别
+  show_confidence: true  # 显示置信度
+  show_line: true  # 显示连接线
+  show_position: true  # 显示位置信息
+  show_size: true  # 显示尺寸信息
+  show_track_id: true  # 显示跟踪ID
+  style:  # 样式配置
+    chinese_text_size: 20  # 中文字体大小
+    colors:  # 颜色配置
+      background:  # 背景色(RGB)
       - 0
       - 0
       - 0
-      text:
+      text:  # 文字颜色(RGB)
       - 255
       - 255
       - 255
-    font_scale: 0.01
-    margin: 5
-    thickness: 2
+    font_scale: 0.6  # 字体缩放
+    margin: 5  # 边距
+    thickness: 2  # 线条粗细
+
+# ZLMediaKit服务配置
 zlmediakit:
-  enabled: true
-  host: http://localhost:8000
-  rtsp:
-    port: 8554
-    tcp_mode: true
-  secret: 035c73f7-bb6b-4889-a715-d9eb2d1925cc
+  enabled: true  # 启用ZLMediaKit
+  host: http://localhost:8000  # ZLMediaKit服务地址
+  rtsp:  # RTSP服务配置
+    port: 8554  # RTSP端口
+    tcp_mode: true  # 使用TCP模式
+  secret: 035c73f7-bb6b-4889-a715-d9eb2d1925cc  # API密钥
