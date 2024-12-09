@@ -16,6 +16,8 @@ import sys
 from threading import Thread
 import asyncio
 from datetime import datetime
+from typing import Optional
+import base64
 
 class CommandReader(Thread):
     def __init__(self):
@@ -42,6 +44,149 @@ class CommandReader(Thread):
                 self.queue.get_nowait()
             except queue.Empty:
                 break
+
+class RtspFrameReader:
+    def __init__(self, rtsp_url: str, queue_size: int = 30):
+        self.rtsp_url = rtsp_url
+        self.frame_queue = asyncio.Queue(maxsize=queue_size)
+        self.running = False
+        self.read_task = None
+        
+        # 检测系统平台
+        self.platform = sys.platform
+        
+        # 初始化硬件解码配置
+        self.hw_decoders = {
+            'win32': [
+                {'api': cv2.CAP_MSMF, 'name': 'MSMF'},  # Windows Media Foundation
+                {'api': cv2.CAP_DSHOW, 'name': 'DirectShow'}, 
+            ],
+            'linux': [
+                {'api': cv2.CAP_FFMPEG, 'name': 'VAAPI', 'options': 'hw_device_type=vaapi'},
+                {'api': cv2.CAP_FFMPEG, 'name': 'NVDEC', 'options': 'hw_device_type=cuda'},
+            ],
+            'darwin': [
+                {'api': cv2.CAP_FFMPEG, 'name': 'VideoToolbox', 'options': 'videotoolbox'},
+            ]
+        }
+        
+    async def _init_capture(self):
+        """初始化视频捕获"""
+        # 获取当前平台的解码器列表
+        decoders = self.hw_decoders.get(self.platform, [])
+        if not decoders:
+            decoders = [{'api': cv2.CAP_FFMPEG, 'name': 'Software'}]
+        
+        # 构建基础RTSP URL参数
+        base_params = (
+            "rtsp_transport=tcp&"
+            "buffer_size=1024000&"
+            "max_delay=500000&"
+            "stimeout=20000000&"
+            "reorder_queue_size=0"
+        )
+        
+        # 尝试每个解码器
+        for decoder in decoders:
+            try:
+                print(f"\n尝试使用 {decoder['name']} 解码器:")
+                
+                # 构建完整的URL
+                url = f"{self.rtsp_url}?{base_params}"
+                if 'options' in decoder:
+                    url += f"&{decoder['options']}"
+                print(f"URL: {url}")
+                
+                # 创建VideoCapture实例
+                cap = cv2.VideoCapture(url, decoder['api'])
+                
+                # 设置缓冲区大小
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+                
+                # 测试是否可以读取帧
+                if not cap.isOpened():
+                    print(f"{decoder['name']} 解码器打开失败")
+                    cap.release()
+                    continue
+                    
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    print(f"{decoder['name']} 解码器无法读取帧")
+                    cap.release()
+                    continue
+                
+                print(f"{decoder['name']} 解码器初始化成功")
+                
+                # 获取视频信息
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                print(f"视频信息: {width}x{height} @ {fps}fps")
+                
+                return cap
+                
+            except Exception as e:
+                print(f"{decoder['name']} 解码器初始化失败: {str(e)}")
+                continue
+        
+        # 如果所有解码器都失败,使用默认的软解
+        print("\n所有硬件解码器都失败,使用软解码:")
+        url = f"{self.rtsp_url}?{base_params}"
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        
+        if not cap.isOpened():
+            raise Exception("无法初始化视频捕获")
+            
+        return cap
+        
+    async def start(self):
+        """启动读取任务"""
+        self.running = True
+        self.read_task = asyncio.create_task(self._read_frames())
+        
+    async def stop(self):
+        """停止读取任务"""
+        self.running = False
+        if self.read_task:
+            await self.read_task
+        
+    async def get_frame(self) -> Optional[np.ndarray]:
+        """获取一帧图像"""
+        try:
+            return await asyncio.wait_for(self.frame_queue.get(), timeout=1.0)
+        except asyncio.TimeoutError:
+            return None
+        
+    async def _read_frames(self):
+        """异步读取帧"""
+        try:
+            # 初始化视频捕获
+            cap = await self._init_capture()
+            
+            while self.running:
+                ret, frame = cap.read()
+                if not ret:
+                    await asyncio.sleep(0.1)
+                    continue
+                    
+                # 如果队列满了，移除最旧的帧
+                if self.frame_queue.full():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                
+                await self.frame_queue.put(frame)
+                await asyncio.sleep(0.001)  # 避免CPU占用过高
+                
+        except Exception as e:
+            print(f"读取帧异常: {str(e)}")
+            raise
+            
+        finally:
+            if 'cap' in locals():
+                cap.release()
 
 class MeekYolo:
     def __init__(self, config_path='config/config.yaml'):
@@ -94,7 +239,7 @@ class MeekYolo:
         
         # 添加回调函数属性
         self.callback_func = None
-        self.task_id = None  # 添加任务ID属性
+        self.task_id = None  # 添加任务ID性
 
     def initialize_model(self):
         # 设置设备
@@ -118,13 +263,42 @@ class MeekYolo:
         if source_type == 'rtsp':
             self.process_func = self.process_rtsp
             rtsp_url = self.config['source']['rtsp']['url']
-            options = self.config['source']['rtsp']['ffmpeg_options']
-            if options:
-                rtsp_url += ''.join(options)
-            self.cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-            if not self.cap.isOpened():
-                raise Exception("无法打开RTSP流")
-                
+            
+            # 添加重试逻辑
+            max_retries = 3
+            retry_count = 0
+            success = False
+            
+            while retry_count < max_retries and not success:
+                try:
+                    print(f"\n尝试初始化 RTSP 流 (尝试 {retry_count + 1}/{max_retries}):")
+                    print(f"URL: {rtsp_url}")
+                    
+                    self.cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                    if not self.cap.isOpened():
+                        raise Exception("无法打开RTSP流")
+                    
+                    # 测试读取一帧
+                    ret, frame = self.cap.read()
+                    if not ret:
+                        raise Exception("无法读取视频帧")
+                    
+                    # 如果成功读取帧，设置成功标志
+                    success = True
+                    print("RTSP 流初始化成功")
+                    
+                except Exception as e:
+                    print(f"初始化失败: {str(e)}")
+                    if self.cap is not None:
+                        self.cap.release()
+                    
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        print(f"等待 2 秒后重试...")
+                        time.sleep(2)
+                    else:
+                        raise Exception(f"RTSP 流初始化失败，已重试 {max_retries} 次")
+            
         elif source_type == 'image':
             self.process_func = self.process_image
             self.image_path = self.config['source']['image']['path']
@@ -165,48 +339,72 @@ class MeekYolo:
         
         try:
             while self.running:
-                ret, frame = self.cap.read()
-                if not ret:
+                if not hasattr(self, 'cap') or not self.cap.isOpened():
+                    # 重新初始化连接
                     if retry_count >= max_retries:
                         raise Exception("重试次数超过上限,退出程序")
+                    
+                    print(f"\n重新初始化 RTSP 连接 (重试 {retry_count + 1}/{max_retries})")
+                    self.initialize_source()
                     retry_count += 1
-                    await asyncio.sleep(2)  # 使用异步睡眠
-                    self.cap.release()
-                    self.cap = cv2.VideoCapture(self.config['source']['rtsp']['url'])
                     continue
                 
-                retry_count = 0
+                ret, frame = self.cap.read()
+                if not ret:
+                    print("读取帧失败，尝试重新连接")
+                    self.cap.release()
+                    await asyncio.sleep(1)
+                    continue
+                
+                retry_count = 0  # 重置重试计数
                 
                 # 处理帧
                 results = self.process_frame(frame)
                 
-                # 如果检测到目标且设置了回调函数，立即发送结果
-                if results and self.callback_func:
-                    formatted_results = self.format_detections(results)
-                    # 创建异步任务发送结果
-                    await self.callback_func(self.task_id, {
-                        "timestamp": datetime.now().isoformat(),
-                        "detections": formatted_results
-                    })
+                # 检查是否需要发送回调
+                current_time = datetime.now()
+                if results and self.callback_func and \
+                   (not hasattr(self, 'last_callback_time') or 
+                    (current_time - self.last_callback_time).total_seconds() >= self.callback_interval):
+                    
+                    try:
+                        # 绘制结果
+                        result_frame = self.draw_results(frame.copy(), results)
+                        
+                        # 生成时间戳文件名
+                        timestamp = current_time.strftime("%Y%m%d_%H%M%S_%f")
+                        image_filename = f"{timestamp}.jpg"
+                        image_path = os.path.join("results", "images", self.task_id, image_filename)
+                        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+                        
+                        # 保存图片
+                        cv2.imwrite(image_path, result_frame)
+                        
+                        # 转换为base64
+                        _, buffer = cv2.imencode('.jpg', result_frame)
+                        image_base64 = base64.b64encode(buffer).decode('utf-8')
+                        
+                        # 发送回调
+                        formatted_results = self.format_detections(results)
+                        await self.callback_func(self.task_id, {
+                            "timestamp": current_time.isoformat(),
+                            "detections": formatted_results,
+                            "image_base64": image_base64,
+                            "image_path": image_path,
+                            "image_filename": image_filename
+                        })
+                        
+                        self.last_callback_time = current_time
+                        
+                    except Exception as e:
+                        print(f"处理回调时发生错误: {str(e)}")
                 
-                # 如果启用了RTMP输出
-                if self.config.get('output', {}).get('enabled'):
-                    frame = self.draw_results(frame, results)
-                    # TODO: 添加RTMP推流逻辑
-                
-                # 短暂休眠，避免CPU占用过高
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)  # 避免CPU占用过高
                 
         except Exception as e:
             print(f"RTSP处理错误: {str(e)}")
-            # 发送错误通知
-            if self.callback_func and self.task_id:
-                await self.callback_func(self.task_id, {
-                    "status": "failed",
-                    "error": str(e)
-                })
             raise
-        
+            
         finally:
             self.running = False
             if hasattr(self, 'cap'):
@@ -246,7 +444,7 @@ class MeekYolo:
             else:
                 stable_count = 0
             
-            # 如果连续两次检测结果稳定，认为已检测到有目标
+            # 如果连续两次检测结果稳定，认为已检测到目标
             if stable_count >= 2:
                 break
             
@@ -320,7 +518,7 @@ class MeekYolo:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
         
-        # 建视频写入器
+        # 建频写入器
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(save_path, fourcc, fps, (width, height))
         
@@ -358,9 +556,9 @@ class MeekYolo:
                 progress_callback(1.0)
 
     def get_color(self, track_id):
-        """为每个track_id生成唯一���颜色"""
+        """为每个track_id生成唯一颜色"""
         if track_id not in self.id_colors:
-            # 生成随机颜色,但排除接近黑色和白色的颜色
+            # 生成随机颜色,但排��接近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
             self.id_colors[track_id] = color
         return self.id_colors[track_id]
@@ -427,7 +625,7 @@ class MeekYolo:
         return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
 
     def draw_results(self, frame, results):
-        # 获取样式配置
+        # 样式配置
         style = self.config['visualization']['style']
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = style['font_scale']
@@ -487,7 +685,7 @@ class MeekYolo:
                 text_width = max(text_widths)
             else:
                 text_height = 20  # 默认高度
-                text_width = 100  # 默宽度
+                text_width = 100  # 默认宽度
             
             # 计算信息框的位置和大小 - 放置在目标左侧
             info_height = (len(info_list) + 1) * (text_height + margin)  # +1 是为了类别信息
@@ -524,7 +722,7 @@ class MeekYolo:
                 line_end = (x1, y1 + (y2 - y1) // 2)
                 cv2.line(frame, line_start, line_end, box_color, 1)
             
-            # 绘文本信息
+            # 绘制文本信息
             current_y = text_bg_y1 + margin
             
             # 绘制类别信息
@@ -670,10 +868,11 @@ config      - 显示当前配置
         """停止处理"""
         self.running = False
 
-    def set_task_info(self, task_id: str, callback_func=None):
+    def set_task_info(self, task_id: str, callback_func=None, callback_interval: float = 1.0):
         """设置任务信息"""
         self.task_id = task_id
         self.callback_func = callback_func
+        self.callback_interval = callback_interval
 
 if __name__ == "__main__":
     print("请使用 run.py 启完整服务") 

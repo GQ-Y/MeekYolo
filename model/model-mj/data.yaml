@@ -1,7 +1,17 @@
-path: ''
-train: images/train
-val: images/val
-nc: 19
+# 模型管理信息
+code: 'model-mj'           # 模型编码
+version: '1.0.0'          # 模型版本
+name: '麻将检测模型'        # 模型名称（将 mj 改为更具描述性的名称）
+description: '用于检测麻将牌型识别'  # 模型描述（将 desc 改为 description）
+author: 'AI Team'         # 作者
+create_time: '2024-03-14T10:00:00'  # 创建时间
+update_time: '2024-03-14T10:00:00'  # 更新时间
+
+# 训练配置
+path: ''                  # 模型路径
+train: images/train       # 训练集路径
+val: images/val          # 验证集路径
+nc: 19                   # 类别数
 names:
   0: 一万
   1: 二万

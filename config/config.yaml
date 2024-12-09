@@ -1,84 +1,85 @@
-# 环境配置
-environment:
-  is_docker: false  # 是否在Docker环境中运行
-  enable_gui: true  # 是否启用GUI显示（在Docker环境中会被自动禁用）
-
-# 输入源配置
-source:
-  # 输入类型: rtsp, image, images, video
-  type: "rtsp"
-  
-  # RTSP流配置
-  rtsp:
-    url: "rtsp://223.85.203.115:554/rtp/34020000001110000067_34020000001320000003"
-    ffmpeg_options:
-      - "?tcp"
-  
-  # 单图片配置
-  image:
-    path: "data/test.png"
-    save_path: "results/test_result.png"  # 处理结果保存路径
-  
-  # 多图片配置
-  images:
-    input_dir: "data/images"              # 输入图片文件夹
-    save_dir: "results/images"            # 结果保存文件夹
-    formats: [".jpg", ".jpeg", ".png"]    # 支持的图片格式
-  
-  # 视频文件配置
-  video:
-    path: "data/video/test2.mp4"
-    save_path: "results/video/test_result2.mp4"  # 处理结果保存路径
-    fps: 30                               # 输出视频帧率
-
-model:
-  path: "model/model-gcc/best.pt"
-  conf_thres: 0.5
-
-display:
-  window_name: "MeekYolo Detection"
-  show_fps: true
-  show_window: true  # 在Docker环境中会被自动禁用
-
+callback:
+  enabled: false
+  retry:
+    max_retries: 10
+    retry_delay: 1.0
+    timeout: 10
+  url: 127.0.0.1:8081
 console:
   enabled: true
-  show_time: true
-  show_total: true
   show_details: true
   show_separator: true
-
-visualization:
-  show_box: true
-  show_class: true
-  show_track_id: true
-  show_confidence: true
-  show_position: true
-  show_size: true
-  show_anchor: true
-  show_line: true
-
-  style:
-    font_scale: 0.6
-    thickness: 2
-    chinese_text_size: 20
-    margin: 5
-    colors:
-      text: [255, 255, 255]
-      background: [0, 0, 0]
-
+  show_time: true
+  show_total: true
+display:
+  show_fps: true
+  show_window: true
+  window_name: MeekYolo Detection
+environment:
+  enable_gui: true
+  is_docker: false
+model:
+  conf_thres: 0.2
+  path: model/model-gcc/best.pt
+model_management:
+  model_config_template:
+    author: ''
+    code: ''
+    create_time: ''
+    description: ''
+    name: ''
+    update_time: ''
+    version: 1.0.0
+  model_dir: model
+  required_files:
+  - best.pt
+  - data.yaml
+  temp_dir: temp/models
+print:
+  enabled: true
+source:
+  image:
+    path: data/test.png
+    save_path: results/test_result.png
+  images:
+    formats:
+    - .jpg
+    - .jpeg
+    - .png
+    input_dir: data/images
+    save_dir: results/images
+  rtsp:
+    ffmpeg_options:
+    - ?tcp
+    url: 
+  type: rtsp
+  video:
+    fps: 30
+    path: data/video/test2.mp4
+    save_path: results/video/test_result2.mp4
 tracking:
   enabled: true
   persist: true
-
-# 打印控制
-print:
-  enabled: true        # 是否允许任何打印输出
-
-# 添加回调配置
-callback:
-  enabled: false  # 是否启用回调
-  url: '127.0.0.1:8081'   # 默认回调地址
-  retry:
-    max_retries: 10       # 最大重试次数
-    retry_delay: 1.0      # 重试间隔（秒）
-    timeout: 10           # 请求超时时间（秒）
+visualization:
+  show_anchor: true
+  show_box: true
+  show_class: true
+  show_confidence: true
+  show_line: true
+  show_position: true
+  show_size: true
+  show_track_id: true
+  style:
+    chinese_text_size: 20
+    colors:
+      background:
+      - 0
+      - 0
+      - 0
+      text:
+      - 255
+      - 255
+      - 255
+    font_scale: 0.6
+    margin: 5
+    thickness: 2
