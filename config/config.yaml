@@ -36,7 +36,7 @@ model_management:
   - data.yaml
   temp_dir: temp/models
 print:
-  enabled: true
+  enabled: false
 source:
   image:
     path: data/test.png
