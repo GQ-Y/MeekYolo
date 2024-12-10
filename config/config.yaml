@@ -28,7 +28,7 @@ environment:
 
 # 模型配置
 model:
-  conf_thres: 0.01  # 目标检测置信度阈值(0-1)
+  conf_thres: 0.5  # 目标检测置信度阈值(0-1)
   path: model/model-gcc/best.pt  # 模型文件路径
 
 # 模型管理配置

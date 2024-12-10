@@ -78,7 +78,7 @@ class AnalysisService:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def analyze_uploaded_images(self, files: List[UploadFile]) -> List[AnalysisResult]:
-        """分析上传���图片文件"""
+        """分析上传的图片文件"""
         try:
             if not files:
                 raise HTTPException(status_code=400, detail="未提供文件")
@@ -216,7 +216,7 @@ class AnalysisService:
             })
 
     async def start_rtsp_analysis(self, request: RtspRequest) -> RtspAnalysisTask:
-        """启��RTSP流分析"""
+        """启动RTSP流分析"""
         # 检查是否存在相同的RTSP地址
         existing_task = None
         for task in self._rtsp_tasks.values():
@@ -377,6 +377,57 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"RTSP分析失败: {str(e)}")
             raise
+
+    async def test_rtsp_connection(self, request: RtspRequest) -> dict:
+        """测试RTSP流连接"""
+        try:
+            # 创建检测器实例
+            detector = MeekYolo()
+            
+            # 测试RTSP连接
+            try:
+                # 使用 apipreference 参数指定使用 FFMPEG
+                cap = cv2.VideoCapture(request.rtsp_url, apiPreference=cv2.CAP_FFMPEG)
+                if not cap.isOpened():
+                    raise Exception("无法打开RTSP流")
+                
+                # 获取视频流信息
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                
+                # 读取一帧测试
+                ret, frame = cap.read()
+                if not ret:
+                    raise Exception("无法读取视频帧")
+                    
+                cap.release()
+                
+                # 返回详细信息
+                return {
+                    "status": "success",
+                    "url": request.rtsp_url,
+                    "stream_info": {
+                        "width": width,
+                        "height": height,
+                        "fps": fps
+                    },
+                    "message": "RTSP流连接测试成功"
+                }
+                
+            except Exception as e:
+                raise Exception(f"RTSP连接测试失败: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"RTSP连接测试失败: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "status": "error",
+                    "url": request.rtsp_url,  # 只使用 URL 字符串
+                    "message": str(e)
+                }
+            )
 
     def format_detections(self, results) -> List[dict]:
         """格式化检测结果"""
