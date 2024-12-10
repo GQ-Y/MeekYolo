@@ -4,7 +4,7 @@ callback:
     max_retries: 10
     retry_delay: 1.0
     timeout: 10
-  url: http://192.168.1.21:8081
+  url: http://127.0.0.1:8081
 console:
   enabled: true
   show_details: true

@@ -12,7 +12,6 @@ router = APIRouter()
 
 model_service = ModelService()
 
-@router.get("")
 @router.get("/")
 async def list_models():
     """列出所有模型"""
@@ -41,7 +40,7 @@ async def upload_model(
     
     - file: ZIP文件，包含模型文件和配置文件
     - name: 模型名称（可选，如果不提供则从yaml中读取）
-    - code: 模���代码（可选，如果不提供则从yaml中读取）
+    - code: 模型代码（可选，如果不提供则从yaml中读取）
     - version: 版本号（可选）
     - author: 作者（可选）
     - description: 描述（可选）
@@ -62,7 +61,7 @@ async def upload_model(
         if not pt_files:
             raise HTTPException(
                 status_code=400,
-                detail="ZIP文件中未找到.pt模型文件"
+                detail="ZIP文件中未找到.pt模��文件"
             )
         
         # 确定主要模型文件
@@ -162,9 +161,4 @@ async def upload_model(
 @router.delete("/{code}")
 async def delete_model(code: str):
     """删除模型"""
-    return await model_service.delete_model(code)
-
-@router.get("")
-async def list_models_root():
-    """列出所有模型（根路由）"""
-    return await list_models() 
+    return await model_service.delete_model(code) 

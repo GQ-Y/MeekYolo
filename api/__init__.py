@@ -38,8 +38,10 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(analysis_router, prefix="/analyze", tags=["analysis"])
     app.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
-    print("注册路由:")
-    print(f"- models_router: {models_router}")
+    print("\n注册路由:")
+    print(f"- models_router: 路由数量={len(models_router.routes)}")
+    print(f"- models_router: 路由前缀={models_router.prefix}")
+    print(f"- models_router: 可用路由=[{', '.join(r.path for r in models_router.routes)}]")
     app.include_router(models_router, prefix="/models", tags=["models"])
     app.include_router(config_router, prefix="/config", tags=["config"])
     app.include_router(system_router, prefix="/system", tags=["system"])
