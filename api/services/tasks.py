@@ -3,6 +3,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from api.models.tasks import VideoAnalysisTask, RtspAnalysisTask
 from api.services.callback import CallbackService
+from api.services.model import ModelService
 
 class TaskService:
     def __init__(self):
@@ -251,106 +252,115 @@ class TaskService:
     
     async def get_rtsp_tasks_stats(self):
         """获取RTSP任务统计"""
-        print("\n获取RTSP任务统计:")
-        print(f"当前任务数量: {len(self.rtsp_tasks)}")
-        print(f"任务ID列表: {list(self.rtsp_tasks.keys())}")
-        
-        # 获取检测器数量
-        from api.services.analysis import AnalysisService
-        active_detectors = len(AnalysisService._rtsp_detectors)
-        print(f"活跃检测器数量: {active_detectors}")
-        print(f"检测器ID列表: {list(AnalysisService._rtsp_detectors.keys())}")
-        
-        # 基础统计信息
-        stats = {
-            "total": len(self.rtsp_tasks),
-            "by_status": {},
-            "active_detectors": active_detectors,
-            "details": {
-                "processing": [],
-                "offline": [],
-                "stopped": [],
-                "failed": []
-            }
-        }
-        
-        # 按状态统计任务数量并收集详细信息
-        for task_id, task in self.rtsp_tasks.items():
-            print(f"\n处理任务 {task_id}:")
-            print(f"- 状态: {task.status}")
-            print(f"- URL: {task.rtsp_url}")
-            
-            # 更新状态计数
-            stats["by_status"][task.status] = stats["by_status"].get(task.status, 0) + 1
-            
-            # 收集任务详细信息
-            task_info = {
-                "task_id": task_id,
-                "rtsp_url": task.rtsp_url,
-                "created_at": task.created_at.isoformat(),
-                "stream_url": task.stream_url
-            }
-            
-            # 根据状态添加特定信息
-            if task.status == "processing":
-                if task_id in AnalysisService._rtsp_detectors:
-                    detector = AnalysisService._rtsp_detectors[task_id]
-                    task_info.update({
-                        "fps": detector.get_fps(),
-                        "frame_count": detector.get_frame_count(),
-                        "running_time": (datetime.now() - task.created_at).total_seconds()
-                    })
-                    print(f"- 检测器信息: fps={task_info['fps']}, frames={task_info['frame_count']}")
-                else:
-                    print(f"- 警告: 任务状态为processing但未找到对应检测器")
-                stats["details"]["processing"].append(task_info)
-                
-            elif task.status == "offline":
-                task_info.update({
-                    "reconnect_count": task.reconnect_count,
-                    "last_reconnect": task.last_reconnect.isoformat() if task.last_reconnect else None,
-                    "error": task.error
-                })
-                print(f"- 重连信息: count={task.reconnect_count}, last={task_info['last_reconnect']}")
-                stats["details"]["offline"].append(task_info)
-                
-            elif task.status == "stopped":
-                task_info.update({
-                    "stopped_at": task.stopped_at.isoformat() if task.stopped_at else None,
-                    "running_time": (task.stopped_at - task.created_at).total_seconds() if task.stopped_at else None
-                })
-                print(f"- 停止时间: {task_info['stopped_at']}")
-                stats["details"]["stopped"].append(task_info)
-                
-            elif task.status == "failed":
-                task_info.update({
-                    "error": task.error,
-                    "failed_at": task.stopped_at.isoformat() if task.stopped_at else None
-                })
-                print(f"- 错误信息: {task.error}")
-                stats["details"]["failed"].append(task_info)
-        
-        # 添加系统资源使用情况
         try:
-            import psutil
-            stats["system"] = {
-                "cpu_percent": psutil.cpu_percent(),
-                "memory_percent": psutil.virtual_memory().percent,
-                "disk_usage": psutil.disk_usage('/').percent
+            print("\n获取RTSP任务统计:")
+            print(f"当前任务数量: {len(self.rtsp_tasks)}")
+            print(f"任务ID列表: {list(self.rtsp_tasks.keys())}")
+            
+            # 获取检测器数量
+            from api.services.analysis import AnalysisService
+            active_detectors = len(AnalysisService._rtsp_detectors)
+            print(f"活跃检测器数量: {active_detectors}")
+            print(f"检测器ID列表: {list(AnalysisService._rtsp_detectors.keys())}")
+            
+            # 基础统计信息
+            stats = {
+                "total": len(self.rtsp_tasks),
+                "by_status": {},
+                "active_detectors": active_detectors,
+                "details": {
+                    "processing": [],
+                    "offline": [],
+                    "stopped": [],
+                    "failed": []
+                }
             }
-            print(f"\n系统资源使用:")
-            print(f"- CPU: {stats['system']['cpu_percent']}%")
-            print(f"- 内存: {stats['system']['memory_percent']}%")
-            print(f"- 磁盘: {stats['system']['disk_usage']}%")
-        except ImportError:
-            print("psutil not installed, skipping system stats")
-        
-        # 添加时间信息
-        stats["timestamp"] = datetime.now().isoformat()
-        
-        print("\n统计完成")
-        print(f"- 总任务数: {stats['total']}")
-        print(f"- 状态分布: {stats['by_status']}")
-        print(f"- 活跃检测器: {stats['active_detectors']}")
-        
-        return stats 
+            
+            # 按状态统计任务数量并收集详细信息
+            for task_id, task in self.rtsp_tasks.items():
+                print(f"\n处理任务 {task_id}:")
+                print(f"- 状态: {task.status}")
+                print(f"- URL: {task.rtsp_url}")
+                
+                # 更新状态计数
+                stats["by_status"][task.status] = stats["by_status"].get(task.status, 0) + 1
+                
+                # 收集任务详细信息
+                task_info = {
+                    "task_id": task_id,
+                    "rtsp_url": task.rtsp_url,
+                    "created_at": task.created_at.isoformat(),
+                    "stream_url": task.stream_url,
+                    "status": task.status  # 添加状态信息
+                }
+                
+                # 根据状态添加特定信息
+                if task.status == "processing":
+                    if task_id in AnalysisService._rtsp_detectors:
+                        detector = AnalysisService._rtsp_detectors[task_id]
+                        try:
+                            task_info.update({
+                                "fps": detector.get_fps() if hasattr(detector, 'get_fps') else None,
+                                "frame_count": detector.get_frame_count() if hasattr(detector, 'get_frame_count') else None,
+                                "running_time": (datetime.now() - task.created_at).total_seconds()
+                            })
+                            print(f"- 检测器信息: fps={task_info.get('fps')}, frames={task_info.get('frame_count')}")
+                        except Exception as e:
+                            print(f"- 获取检测器信息失败: {str(e)}")
+                    else:
+                        print(f"- 警告: 任务状态为processing但未找到对应检测器")
+                    stats["details"]["processing"].append(task_info)
+                    
+                elif task.status == "offline":
+                    task_info.update({
+                        "reconnect_count": task.reconnect_count,
+                        "last_reconnect": task.last_reconnect.isoformat() if task.last_reconnect else None,
+                        "error": task.error
+                    })
+                    print(f"- 重连信息: count={task.reconnect_count}, last={task_info['last_reconnect']}")
+                    stats["details"]["offline"].append(task_info)
+                    
+                elif task.status == "stopped":
+                    task_info.update({
+                        "stopped_at": task.stopped_at.isoformat() if task.stopped_at else None,
+                        "running_time": (task.stopped_at - task.created_at).total_seconds() if task.stopped_at else None
+                    })
+                    print(f"- 停止时间: {task_info['stopped_at']}")
+                    stats["details"]["stopped"].append(task_info)
+                    
+                elif task.status == "failed":
+                    task_info.update({
+                        "error": task.error,
+                        "failed_at": task.stopped_at.isoformat() if task.stopped_at else None
+                    })
+                    print(f"- 错误信息: {task.error}")
+                    stats["details"]["failed"].append(task_info)
+            
+            # 添加系统资源使用情况
+            try:
+                import psutil
+                stats["system"] = {
+                    "cpu_percent": psutil.cpu_percent(),
+                    "memory_percent": psutil.virtual_memory().percent,
+                    "disk_usage": psutil.disk_usage('/').percent
+                }
+                print(f"\n系统资源使用:")
+                print(f"- CPU: {stats['system']['cpu_percent']}%")
+                print(f"- 内存: {stats['system']['memory_percent']}%")
+                print(f"- 磁盘: {stats['system']['disk_usage']}%")
+            except ImportError:
+                print("psutil not installed, skipping system stats")
+            
+            # 添加时间信息
+            stats["timestamp"] = datetime.now().isoformat()
+            
+            print("\n统计完成")
+            print(f"- 总任务数: {stats['total']}")
+            print(f"- 状态分布: {stats['by_status']}")
+            print(f"- 活跃检测器: {stats['active_detectors']}")
+            
+            return stats
+            
+        except Exception as e:
+            print(f"获取统计信息失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e)) 

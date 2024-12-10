@@ -25,7 +25,7 @@ async def analyze_video(request: VideoRequest):
 
 @router.post("/rtsp")
 async def analyze_rtsp(request: RtspRequest):
-    """启动RTSP流分析"""
+    """分析RTSP流"""
     return await analysis_service.start_rtsp_analysis(request)
 
 @router.post("/rtsp/test")

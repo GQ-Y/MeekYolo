@@ -1,0 +1,15 @@
+code: gcc
+version: 1.0.0
+name: 工程车模型算法
+description: 用于检测渣土车、挖掘机、吊车等工程车辆
+author: AI Team
+create_time: '2024-12-10T15:39:36.503011'
+update_time: '2024-12-10T15:39:36.503020'
+path: ''
+train: images/train
+val: images/val
+nc: 3
+names:
+  0: 渣土车
+  1: 挖掘机
+  2: 吊车

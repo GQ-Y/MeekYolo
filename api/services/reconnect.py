@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Callable, Any
 from api.core.config import settings
 from api.models.tasks import RtspAnalysisTask
+from api.services.model import ModelService
 
 class RtspReconnectManager:
     def __init__(self):
@@ -71,7 +72,7 @@ class RtspReconnectManager:
             # 测试连接
             cap = cv2.VideoCapture(task.rtsp_url, cv2.CAP_FFMPEG)
             if not cap.isOpened():
-                print(f"重连失败 - 任务 {task_id}, 尝试次数: {task.reconnect_count}")
+                print(f"重连失��� - 任务 {task_id}, 尝试次数: {task.reconnect_count}")
                 cap.release()
                 return
             
@@ -108,7 +109,7 @@ class RtspReconnectManager:
             })
             
         except Exception as e:
-            print(f"重连异常 - 任务 {task_id}: {str(e)}")
+            print(f"��连异常 - 任务 {task_id}: {str(e)}")
             # 发送重连失败通知
             await self._send_callback(task_id, {
                 "status": "reconnect_failed",

@@ -1,16 +1,24 @@
-from pydantic import BaseModel
-from datetime import datetime
+from pydantic import BaseModel, Field
+from typing import Dict, Optional
 
 class ModelInfo(BaseModel):
     """模型信息"""
-    code: str                # 模型编码
-    version: str            # 模型版本
-    name: str              # 模型名称
-    description: str       # 模型描述
-    author: str           # 作者
-    create_time: datetime  # 创建时间
-    update_time: datetime  # 更新时间
-    path: str             # 模型路径
+    name: str = Field(..., description="模型名称")
+    code: str = Field(..., description="模型编码")
+    version: str = Field("1.0.0", description="版本号")
+    author: str = Field("", description="作者")
+    description: str = Field("", description="描述")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "工地车辆检测模型",
+                "code": "model-gcc",
+                "version": "1.0.0",
+                "author": "AI Team",
+                "description": "用于检测渣土车、挖掘机、吊车等工程车辆"
+            }
+        }
 
 class ModelList(BaseModel):
     """模型列表"""

@@ -8,8 +8,8 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./config:/app/config
+      - ./model:/app/model:ro
       - ./data:/app/data
-      - ./model:/app/model
       - ./results:/app/results
     environment:
       - PYTHONUNBUFFERED=1
