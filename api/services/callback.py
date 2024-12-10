@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 class CallbackService:
     def __init__(self):
-        self.config = settings.CALLBACK_CONFIG
+        self.config = settings.callback
+        self.session = None
     
     async def send_callback_with_retry(self, task_id: str, data: dict):
         """带重试的回调发送"""

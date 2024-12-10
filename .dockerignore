@@ -19,4 +19,12 @@ coverage.xml
 *.log
 .pytest_cache/
 .git
-.gitignore 
+.gitignore
+
+# 确保不忽略这些目录和文件
+!config/
+!config/default_config.yaml
+!ZLMediaKit/
+
+# 但是忽略ZLMediaKit的构建目录
+ZLMediaKit/build/ 

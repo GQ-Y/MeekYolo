@@ -52,6 +52,11 @@ source:
     ffmpeg_options:
     - ?tcp
     url: null
+    timeout: 5
+    connection_timeout: 10
+    read_timeout: 5
+    max_retries: 3
+    retry_delay: 5
   type: rtsp
   video:
     fps: 30

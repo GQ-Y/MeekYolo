@@ -31,8 +31,12 @@ class AnalysisService:
     def __init__(self):
         self.callback_service = CallbackService()
         self.video_tasks: Dict[str, VideoAnalysisTask] = {}
+        self.model_config = settings.model
+        self.source_config = settings.source
+        self.visualization_config = settings.visualization
+        self.tracking_config = settings.tracking
         
-        # 注册回调函数到重连管理器
+        # 注册回调函数到重连管理
         from api.services.reconnect import reconnect_manager
         reconnect_manager.register_callbacks(
             process_rtsp_task=self._process_rtsp_task,
@@ -204,7 +208,7 @@ class AnalysisService:
             })
             
         except Exception as e:
-            # 更新失败状态
+            # ���新失败状态
             task.status = "failed"
             task.error = str(e)
             task.completed_at = datetime.now()
@@ -294,11 +298,25 @@ class AnalysisService:
             self._rtsp_detectors[task_id] = detector
             
             # 配置检测器
-            detector.config['environment']['enable_gui'] = False
-            detector.config['display']['show_window'] = False
-            detector.config['source']['type'] = 'rtsp'
-            detector.config['source']['rtsp']['url'] = rtsp_url
-            detector.config['source']['rtsp']['timeout'] = settings.RTSP_CONNECTION_CONFIG['read_timeout']
+            detector.config.update({
+                'environment': {
+                    'enable_gui': False
+                },
+                'display': {
+                    'show_window': False
+                },
+                'source': {
+                    'type': 'rtsp',
+                    'rtsp': {
+                        'url': rtsp_url,
+                        'timeout': settings.source['rtsp'].get('timeout', 5),
+                        'connection_timeout': settings.source['rtsp'].get('connection_timeout', 10),
+                        'read_timeout': settings.source['rtsp'].get('read_timeout', 5),
+                        'max_retries': settings.source['rtsp'].get('max_retries', 3),
+                        'retry_delay': settings.source['rtsp'].get('retry_delay', 5)
+                    }
+                }
+            })
             
             if output_rtmp:
                 detector.config['output'] = {
@@ -366,7 +384,7 @@ class AnalysisService:
                     raise Exception("无法打开RTSP流")
                 cap.release()
             except Exception as e:
-                raise Exception(f"RTSP连接测试失败: {str(e)}")
+                raise Exception(f"RTSP连接测试失���: {str(e)}")
             
             # 返回结果
             return {
