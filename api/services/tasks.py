@@ -7,11 +7,15 @@ from api.services.callback import CallbackService
 class TaskService:
     def __init__(self):
         self.callback_service = CallbackService()
-        self.rtsp_tasks: Dict[str, RtspAnalysisTask] = {}
+        from api.services.analysis import AnalysisService
+        self.rtsp_tasks = AnalysisService._rtsp_tasks
         self.video_tasks: Dict[str, VideoAnalysisTask] = {}
         
     async def list_rtsp_tasks(self, status: Optional[str], skip: int, limit: int):
         """获取RTSP任务列表"""
+        print(f"当前任务数量: {len(self.rtsp_tasks)}")
+        print(f"任务列表: {[task.task_id for task in self.rtsp_tasks.values()]}")
+        
         tasks = []
         for task in self.rtsp_tasks.values():
             if status and task.status != status:
@@ -54,15 +58,12 @@ class TaskService:
             if task.status in ["processing", "offline"]:
                 # 停止检测器
                 from api.services.analysis import AnalysisService
-                analysis_service = AnalysisService()
-                if task_id in analysis_service.rtsp_detectors:
-                    detector = analysis_service.rtsp_detectors[task_id]
+                if task_id in AnalysisService._rtsp_detectors:
+                    detector = AnalysisService._rtsp_detectors[task_id]
                     detector.stop()
-                    del analysis_service.rtsp_detectors[task_id]
+                    del AnalysisService._rtsp_detectors[task_id]
                 
-                # 关闭代理
-                await analysis_service.rtsp_proxy.close_proxy(task_id)
-                
+                # 更新任务状态
                 task.status = "stopped"
                 task.stopped_at = datetime.now()
                 
@@ -177,31 +178,8 @@ class TaskService:
                 tasks_to_cleanup.append(task_id)
                 print(f"- 任务 {task_id} 将被清理")
         
-        # 如果没有匹配的任务,返回成功但说明没有匹配任务
-        if not tasks_to_cleanup:
-            print(f"没有匹配状态 {status} 的任务")
-            return {
-                "status": "completed",
-                "message": f"没有匹配状态 {status} 的任务",
-                "filter": {
-                    "status": status,
-                    "force": force
-                },
-                "stats": {
-                    "before": before_stats,
-                    "after": before_stats,
-                    "cleaned": 0,
-                    "skipped": 0,
-                    "failed": 0
-                },
-                "results": cleanup_results
-            }
-        
-        print(f"\n待清理任务数: {len(tasks_to_cleanup)}")
-        
         # 执行清理
         from api.services.analysis import AnalysisService
-        analysis_service = AnalysisService()
         
         for task_id in tasks_to_cleanup:
             task = self.rtsp_tasks[task_id]
@@ -221,14 +199,11 @@ class TaskService:
                     continue
                 
                 # 如果任务正在运行,先停止检测器
-                if task.status in ["processing", "offline"] and task_id in analysis_service.rtsp_detectors:
+                if task.status in ["processing", "offline"] and task_id in AnalysisService._rtsp_detectors:
                     print(f"- 停止检测器")
-                    detector = analysis_service.rtsp_detectors[task_id]
+                    detector = AnalysisService._rtsp_detectors[task_id]
                     detector.stop()
-                    del analysis_service.rtsp_detectors[task_id]
-                    
-                    # 关闭代理
-                    await analysis_service.rtsp_proxy.close_proxy(task_id)
+                    del AnalysisService._rtsp_detectors[task_id]
                 
                 # 从任务列表中删除
                 print(f"- 删除任务")
@@ -257,12 +232,6 @@ class TaskService:
         for task in self.rtsp_tasks.values():
             after_stats["by_status"][task.status] = after_stats["by_status"].get(task.status, 0) + 1
         
-        print(f"\n清理完成:")
-        print(f"- 成功: {len(cleanup_results['success'])}")
-        print(f"- 跳过: {len(cleanup_results['skipped'])}")
-        print(f"- 失败: {len(cleanup_results['failed'])}")
-        print(f"剩余任务数: {after_stats['total']}")
-        
         return {
             "status": "completed",
             "message": "清理完成",
@@ -282,10 +251,15 @@ class TaskService:
     
     async def get_rtsp_tasks_stats(self):
         """获取RTSP任务统计"""
+        print("\n获取RTSP任务统计:")
+        print(f"当前任务数量: {len(self.rtsp_tasks)}")
+        print(f"任务ID列表: {list(self.rtsp_tasks.keys())}")
+        
         # 获取检测器数量
         from api.services.analysis import AnalysisService
-        analysis_service = AnalysisService()
-        active_detectors = len(analysis_service.rtsp_detectors)
+        active_detectors = len(AnalysisService._rtsp_detectors)
+        print(f"活跃检测器数量: {active_detectors}")
+        print(f"检测器ID列表: {list(AnalysisService._rtsp_detectors.keys())}")
         
         # 基础统计信息
         stats = {
@@ -302,6 +276,10 @@ class TaskService:
         
         # 按状态统计任务数量并收集详细信息
         for task_id, task in self.rtsp_tasks.items():
+            print(f"\n处理任务 {task_id}:")
+            print(f"- 状态: {task.status}")
+            print(f"- URL: {task.rtsp_url}")
+            
             # 更新状态计数
             stats["by_status"][task.status] = stats["by_status"].get(task.status, 0) + 1
             
@@ -315,13 +293,16 @@ class TaskService:
             
             # 根据状态添加特定信息
             if task.status == "processing":
-                if task_id in analysis_service.rtsp_detectors:
-                    detector = analysis_service.rtsp_detectors[task_id]
+                if task_id in AnalysisService._rtsp_detectors:
+                    detector = AnalysisService._rtsp_detectors[task_id]
                     task_info.update({
                         "fps": detector.get_fps(),
                         "frame_count": detector.get_frame_count(),
                         "running_time": (datetime.now() - task.created_at).total_seconds()
                     })
+                    print(f"- 检测器信息: fps={task_info['fps']}, frames={task_info['frame_count']}")
+                else:
+                    print(f"- 警告: 任务状态为processing但未找到对应检测器")
                 stats["details"]["processing"].append(task_info)
                 
             elif task.status == "offline":
@@ -330,6 +311,7 @@ class TaskService:
                     "last_reconnect": task.last_reconnect.isoformat() if task.last_reconnect else None,
                     "error": task.error
                 })
+                print(f"- 重连信息: count={task.reconnect_count}, last={task_info['last_reconnect']}")
                 stats["details"]["offline"].append(task_info)
                 
             elif task.status == "stopped":
@@ -337,6 +319,7 @@ class TaskService:
                     "stopped_at": task.stopped_at.isoformat() if task.stopped_at else None,
                     "running_time": (task.stopped_at - task.created_at).total_seconds() if task.stopped_at else None
                 })
+                print(f"- 停止时间: {task_info['stopped_at']}")
                 stats["details"]["stopped"].append(task_info)
                 
             elif task.status == "failed":
@@ -344,6 +327,7 @@ class TaskService:
                     "error": task.error,
                     "failed_at": task.stopped_at.isoformat() if task.stopped_at else None
                 })
+                print(f"- 错误信息: {task.error}")
                 stats["details"]["failed"].append(task_info)
         
         # 添加系统资源使用情况
@@ -354,10 +338,19 @@ class TaskService:
                 "memory_percent": psutil.virtual_memory().percent,
                 "disk_usage": psutil.disk_usage('/').percent
             }
+            print(f"\n系统资源使用:")
+            print(f"- CPU: {stats['system']['cpu_percent']}%")
+            print(f"- 内存: {stats['system']['memory_percent']}%")
+            print(f"- 磁盘: {stats['system']['disk_usage']}%")
         except ImportError:
             print("psutil not installed, skipping system stats")
         
         # 添加时间信息
         stats["timestamp"] = datetime.now().isoformat()
+        
+        print("\n统计完成")
+        print(f"- 总任务数: {stats['total']}")
+        print(f"- 状态分布: {stats['by_status']}")
+        print(f"- 活跃检测器: {stats['active_detectors']}")
         
         return stats 

@@ -24,13 +24,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 class AnalysisService:
+    # 将所有共享状态作为类变量
+    _rtsp_tasks: Dict[str, RtspAnalysisTask] = {}
+    _rtsp_detectors: Dict[str, MeekYolo] = {}
+    
     def __init__(self):
-        # 不再需要RTSP代理
-        # self.rtsp_proxy = RTSPProxy()
         self.callback_service = CallbackService()
-        self.rtsp_tasks: Dict[str, RtspAnalysisTask] = {}
         self.video_tasks: Dict[str, VideoAnalysisTask] = {}
-        self.rtsp_detectors: Dict[str, MeekYolo] = {}
         
         # 注册回调函数到重连管理器
         from api.services.reconnect import reconnect_manager
@@ -38,7 +38,22 @@ class AnalysisService:
             process_rtsp_task=self._process_rtsp_task,
             send_callback=self.callback_service.send_callback
         )
-        reconnect_manager.rtsp_tasks = self.rtsp_tasks  # 共享任务字典
+        reconnect_manager.rtsp_tasks = self._rtsp_tasks
+
+    @property
+    def rtsp_detectors(self) -> Dict[str, MeekYolo]:
+        """提供rtsp_detectors的访问接口"""
+        return self._rtsp_detectors
+
+    @property
+    def rtsp_tasks(self) -> Dict[str, RtspAnalysisTask]:
+        """提供rtsp_tasks的访问接口"""
+        return self._rtsp_tasks
+
+    @rtsp_tasks.setter
+    def rtsp_tasks(self, value: Dict[str, RtspAnalysisTask]):
+        """设置rtsp_tasks"""
+        self._rtsp_tasks = value
 
     async def analyze_images(self, request: ImageRequest) -> List[AnalysisResult]:
         """分析图片"""
@@ -63,7 +78,7 @@ class AnalysisService:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def analyze_uploaded_images(self, files: List[UploadFile]) -> List[AnalysisResult]:
-        """分析上传的图片文件"""
+        """分析上传���图片文件"""
         try:
             if not files:
                 raise HTTPException(status_code=400, detail="未提供文件")
@@ -201,10 +216,10 @@ class AnalysisService:
             })
 
     async def start_rtsp_analysis(self, request: RtspRequest) -> RtspAnalysisTask:
-        """启动RTSP流分析"""
+        """启��RTSP流分析"""
         # 检查是否存在相同的RTSP地址
         existing_task = None
-        for task in self.rtsp_tasks.values():
+        for task in self._rtsp_tasks.values():
             if task.rtsp_url == request.rtsp_url:
                 existing_task = task
                 break
@@ -256,7 +271,7 @@ class AnalysisService:
             created_at=datetime.now(),
             callback_interval=request.callback_interval
         )
-        self.rtsp_tasks[task_id] = task
+        self._rtsp_tasks[task_id] = task
         
         # 启动异步处理
         asyncio.create_task(self._process_rtsp_task(
@@ -271,12 +286,12 @@ class AnalysisService:
     async def _process_rtsp_task(self, task_id: str, rtsp_url: str, output_rtmp: str, callback_interval: float):
         """处理RTSP分析任务"""
         try:
-            task = self.rtsp_tasks[task_id]
+            task = self._rtsp_tasks[task_id]
             task.status = "processing"
             
             # 创建检测器实例
             detector = MeekYolo()
-            self.rtsp_detectors[task_id] = detector
+            self._rtsp_detectors[task_id] = detector
             
             # 配置检测器
             detector.config['environment']['enable_gui'] = False
@@ -331,11 +346,11 @@ class AnalysisService:
             
         finally:
             # 清理资源
-            if task_id in self.rtsp_detectors:
+            if task_id in self._rtsp_detectors:
                 try:
-                    detector = self.rtsp_detectors[task_id]
+                    detector = self._rtsp_detectors[task_id]
                     detector.stop()  # 停止检测器
-                    del self.rtsp_detectors[task_id]
+                    del self._rtsp_detectors[task_id]
                 except Exception as cleanup_error:
                     logger.error(f"清理资源失败: {str(cleanup_error)}")
 
