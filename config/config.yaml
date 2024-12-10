@@ -6,7 +6,7 @@ callback:
     timeout: 10
   url: http://127.0.0.1:8081
 console:
-  enabled: true
+  enabled: false
   show_details: true
   show_separator: true
   show_time: true

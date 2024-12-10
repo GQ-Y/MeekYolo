@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 class RTSPProxy:
     def __init__(self):
-        logger.info("初始化RTSP代理")
         self.sdk = ZLMediaKitSDK()
         self.players = {}
         

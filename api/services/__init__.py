@@ -3,4 +3,5 @@ from .tasks import TaskService
 from .model import ModelService
 from .config import ConfigService
 from .callback import CallbackService
-from .reconnect import reconnect_manager 
+from .reconnect import reconnect_manager
+from .task_manager import TaskManager 

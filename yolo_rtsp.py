@@ -15,11 +15,12 @@ import queue
 import sys
 from threading import Thread
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 import base64
 from utils.rtsp_proxy import RTSPProxy
 import logging
+from api.core.managers import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class CommandReader(Thread):
 
     def stop(self):
         self.running = False
-        # 清���队列
+        # 清空队列
         while not self.queue.empty():
             try:
                 self.queue.get_nowait()
@@ -115,7 +116,7 @@ class RtspFrameReader:
                     
                 ret, frame = cap.read()
                 if not ret or frame is None:
-                    print(f"{decoder['name']} 解码器无法���取帧")
+                    print(f"{decoder['name']} 解码器无法读取帧")
                     cap.release()
                     continue
                 
@@ -194,7 +195,7 @@ class RtspFrameReader:
 
 class MeekYolo:
     def __init__(self, config_path='config/config.yaml'):
-        logger.info("初始化YOLO检测器")
+        logger.info("MeekYoloV11 启动成功")
         # 加载配置
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -244,14 +245,17 @@ class MeekYolo:
         
         # 添加回调函数属性
         self.callback_func = None
-        self.task_id = None  # 添加任务ID性
+        self.task_id = None  # 添加任务ID属性
         self.rtsp_proxy = RTSPProxy()
         
+        # 使用全任务管理器
+        self.task_manager = task_manager
+        
+        logger.info("YOLO检测器初始化完成")
+
     def initialize_model(self):
         # 设置设备
         self.device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-        if self.config['print']['enabled']:
-            print(f"使用设备: {self.device}")
         
         # 添加DetectionModel到安全globals列表
         add_safe_globals([DetectionModel])
@@ -267,7 +271,7 @@ class MeekYolo:
         source_type = self.config['source']['type']
         
         if source_type == 'rtsp':
-            # 不在这里��始化RTSP流，而是在process_rtsp中处理
+            # 不在这里初始化RTSP流，而是在process_rtsp中处理
             self.process_func = None
             
         elif source_type == 'image':
@@ -333,7 +337,8 @@ class MeekYolo:
                 raise Exception(f"无法打开RTSP流: {rtsp_url}")
             
             self.running = True
-            logger.info(f"开始处理RTSP流: {rtsp_url}")
+            if self.config['print']['enabled']:
+                logger.info(f"开始处理RTSP流: {rtsp_url}")
             self.last_callback = time.time()
             
             consecutive_errors = 0  # 连续错误计数
@@ -378,11 +383,7 @@ class MeekYolo:
                             _, buffer = cv2.imencode('.jpg', result_frame)
                             image_base64 = base64.b64encode(buffer).decode('utf-8')
                             
-                            # 添加调试日志
-                            logger.info(f"检测到 {len(formatted_results)} 个目标，已保存图片: {image_path}")
-                            logger.info(f"目标详情: {formatted_results}")
-                            
-                            # 发送回调
+                            # 准备回调数据
                             callback_data = {
                                 "task_id": self.task_id,
                                 "timestamp": timestamp.isoformat(),
@@ -392,8 +393,11 @@ class MeekYolo:
                                 "has_detections": True
                             }
                             
-                            # 添加调试日志
-                            logger.info(f"准备发送回调: {callback_data}")
+                            # 只在配置启用时记录日志
+                            if self.config['print']['enabled']:
+                                logger.info(f"检测到 {len(formatted_results)} 个目标，已保存图片: {image_path}")
+                                logger.info(f"目标详情: {formatted_results}")
+                                logger.info(f"准备发送回调: {callback_data}")
                             
                             # 执行回调
                             await self.callback_func(callback_data)
@@ -404,7 +408,7 @@ class MeekYolo:
                         except Exception as callback_error:
                             logger.error(f"回调执行异常: {str(callback_error)}")
                 
-                    # 控制处理速度
+                    # 控制理速度
                     await asyncio.sleep(0.01)  # 避免CPU占用过高
                     
                 except cv2.error as e:
@@ -498,7 +502,7 @@ class MeekYolo:
             results = self.process_frame(frame)
             frame = self.draw_results(frame, results)
             
-            # 生成保存路径
+            # 生成��存路径
             save_name = os.path.basename(image_path)
             save_path = os.path.join(self.save_dir, save_name)
             
@@ -551,7 +555,7 @@ class MeekYolo:
                 # 写入结果
                 out.write(frame)
                 
-                # 回调进度
+                # 回进
                 if progress_callback and total_frames > 0:
                     progress = frame_count / total_frames
                     progress_callback(progress)
@@ -571,27 +575,13 @@ class MeekYolo:
     def get_color(self, track_id):
         """为每个track_id生成唯一颜色"""
         if track_id not in self.id_colors:
-            # 生成随机颜色,但排近黑色和白色的颜色
+            # 生成随机颜色,排近黑色和白色的颜色
             color = tuple(map(int, np.random.randint(50, 200, 3)))
             self.id_colors[track_id] = color
         return self.id_colors[track_id]
 
     def process_frame(self, frame: np.ndarray) -> list:
-        """处理单帧图像
-        
-        Args:
-            frame (np.ndarray): OpenCV格式的图像数组，shape=(H,W,3)，BGR格式
-        
-        Returns:
-            list: 检测结果列表，每个元素为元组 (box, score, cls_name, track_id)
-                - box (list): [x1,y1,x2,y2] 边界框坐标
-                - score (float): 置信度分数
-                - cls_name (str): 目标类别名称
-                - track_id (int): 目标跟踪ID，如果未启用跟踪则为-1
-        """
-        # 添加原始图像信息
-        logger.info(f"处理图像: shape={frame.shape}")
-        
+        """处理单帧图像"""
         # 根据配置决定是否使用跟踪
         if self.config['tracking']['enabled']:
             results = self.tracker(frame, 
@@ -603,25 +593,14 @@ class MeekYolo:
                                  conf=self.config['model']['conf_thres'],
                                  verbose=False)
         
-        # 添加原始检测结果日志
-        if len(results) > 0:
-            result = results[0]
-            boxes = result.boxes
-            logger.info(f"YOLO检测结果: {len(boxes)} 个目标")
-            # 打印每个检测框的原始信息
-            for box in boxes:
-                logger.info(f"原始检测框: {box.xyxy[0]}, 置信度: {box.conf.item()}, 类别: {box.cls.item()}")
-        else:
-            logger.info("YOLO未检测到任何目标")
-        
         processed_results = []
         if len(results) > 0:
             result = results[0]
             boxes = result.boxes
             
-            # 添加调试日志
-            logger.info(f"原始检测结果: {len(boxes)} 个目标")
-            logger.info(f"置信度阈值: {self.config['model']['conf_thres']}")
+            # 只在配置启用且检测到目标时记录日志
+            if len(boxes) > 0 and self.config['print']['enabled']:
+                logger.info(f"检测到 {len(boxes)} 个目标")
             
             for box in boxes:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -631,13 +610,8 @@ class MeekYolo:
                 # 根据配定是否获取跟踪ID
                 track_id = int(box.id[0]) if (self.config['tracking']['enabled'] and box.id is not None) else -1
                 
-                # 添加调试日志
-                logger.info(f"目标: {cls_name}, 置信度: {conf:.3f}, 位置: ({int(x1)},{int(y1)})-({int(x2)},{int(y2)})")
-                
                 processed_results.append(([x1, y1, x2, y2], conf, cls_name, track_id))
-        else:
-            logger.info("未检测到任何目标")
-            
+        
         return processed_results
 
     def calculate_iou(self, box1, box2):
@@ -656,7 +630,7 @@ class MeekYolo:
 
     def cv2AddChineseText(self, img, text, position, textColor=(255, 255, 255), textSize=20):
         """
-        在图片上添加文文本
+        在图片上添加文本
         """
         if isinstance(img, np.ndarray):
             img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -696,7 +670,7 @@ class MeekYolo:
                 box_color = self.get_color(track_id)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, thickness)
                 
-                # 根据配置决定是否显示锚
+                # 根据配置决是否显示锚
                 if self.config['visualization']['show_anchor']:
                     anchor_size = 4
                     cv2.drawMarker(frame, (x1, y1), box_color, cv2.MARKER_CROSS, anchor_size, thickness)
@@ -721,7 +695,7 @@ class MeekYolo:
             if not info_list and not self.config['visualization']['show_class']:
                 continue  # 如果有任何信息需要显示，直接跳过
             
-            # 计文本大小
+            # 计本大小
             text_heights = []
             text_widths = []
             for text in info_list:
@@ -736,11 +710,11 @@ class MeekYolo:
                 text_height = 20  # 默认高度
                 text_width = 100  # 默认宽度
             
-            # 计算信息框的位置和大小 - 放置在目标左侧
+            # 计信息框的位置和大小 - 放置在目标左侧
             info_height = (len(info_list) + 1) * (text_height + margin)  # +1 是为了类别信息
             text_bg_x2 = max(0, x1 - margin)  # 确保不会超出画面左边界
             text_bg_x1 = max(0, text_bg_x2 - text_width - 2 * margin)
-            text_bg_y1 = max(0, y1 + (y2 - y1 - info_height) // 2)  # 直居中
+            text_bg_y1 = max(0, y1 + (y2 - y1 - info_height) // 2)  # 直中
             text_bg_y2 = min(frame.shape[0], text_bg_y1 + info_height)
             
             # 检查重并调整位置
@@ -771,10 +745,10 @@ class MeekYolo:
                 line_end = (x1, y1 + (y2 - y1) // 2)
                 cv2.line(frame, line_start, line_end, box_color, 1)
             
-            # 绘制文本信息
+            # 制文本信息
             current_y = text_bg_y1 + margin
             
-            # 绘制��别信息
+            # 绘类别信息
             if self.config['visualization']['show_class']:
                 frame = self.cv2AddChineseText(frame, 
                                              f"类型: {cls_name}",
@@ -799,59 +773,15 @@ class MeekYolo:
         x1_1, y1_1, x2_1, y2_1 = box1
         x1_2, y1_2, x2_2, y2_2 = box2
         
-        # 如果一个矩形在另一个形的上或方，则不重叠
+        # 如果一个矩形在另一个形的上或方，不重叠
         if y2_1 < y1_2 or y2_2 < y1_1:
             return False
         
-        # 如果一个矩形在另一个矩形的左侧或右侧，则不重叠
+        # 如果一个矩形在另一个矩形左侧或右侧，则不重叠
         if x2_1 < x1_2 or x2_2 < x1_1:
             return False
         
         return True
-
-    @staticmethod
-    def print_help():
-        """打印帮助信息"""
-        print("""\n可用命令:
-start       - 开始分析
-stop        - 停止分析
-quit/exit   - 退出程序
-help        - 显示帮助信息
-status      - 显示前状态
-config      - 显示当前配置
-""")
-
-    def print_status(self):
-        """打印当前状态"""
-        source_type = self.config['source']['type']
-        if source_type == 'rtsp':
-            source = self.config['source']['rtsp']['url']
-        elif source_type == 'image':
-            source = self.config['source']['image']['path']
-        elif source_type == 'images':
-            source = self.config['source']['images']['input_dir']
-        else:
-            source = self.config['source']['video']['path']
-        
-        print(f"""\n当前状态:
-输入类型: {source_type}
-输入: {source}
-跟踪功能: {'启用' if self.config['tracking']['enabled'] else '禁用'}
-""")
-
-    def print_config(self):
-        """打印当前配置"""
-        print("\n\n当前配置:")
-        print(yaml.dump(self.config, allow_unicode=True))
-
-    async def run(self):
-        """运行检测器"""
-        source_type = self.config['source']['type']
-        
-        if source_type == 'rtsp':
-            await self.process_rtsp()
-        else:
-            raise ValueError(f"不支持的输入类型: {source_type}")
 
     def load_class_names(self):
         """从模型配置文件加载类别名称"""
@@ -869,29 +799,52 @@ config      - 显示当前配置
             
             # 转换为字典格式 {index: name}
             if isinstance(names_dict, list):
-                # 如果是列表格式，转换为字典
                 self.names = {i: name for i, name in enumerate(names_dict)}
             elif isinstance(names_dict, dict):
-                # 如果已经是字典格式，直接使用
                 self.names = {int(k): v for k, v in names_dict.items()}
             else:
                 raise ValueError("不支持的类别名称格式")
             
             if not self.names:
                 raise ValueError("未找到类别名称配置")
-                
-            print(f"成功加载类别名称: {self.names}")
-                
+            
         except Exception as e:
-            print(f"加类别名失败: {str(e)}")
-            # 使用默认类别名称作为后备
-            self.names = {
-                0: '未知类别'
-            }
+            logger.error(f"加载类别名称失败: {str(e)}")
+            self.names = {0: '未知类别'}
 
-    def set_callback(self, callback_func):
-        """设置检测结果回调函数"""
+    def set_task_info(self, task_id: str, callback_func=None, callback_interval: float = 1.0):
+        """设置任务信息和回调参数
+        
+        Args:
+            task_id (str): 任务唯一标识符，用于区分不同的分析任务
+            callback_func (Callable, optional): 回调函数，用于接收检测结果
+                回调函数格式: async def callback(data: dict)
+                data 参数包含:
+                    - task_id (str): 任务ID
+                    - timestamp (str): 检测时间，ISO格式
+                    - detections (List[dict]): 检测结果列表，每个检测包含:
+                        - track_id (int): 目标跟踪ID
+                        - class (str): 目标类别
+                        - confidence (float): 置信度
+                        - bbox (dict): 边界框信息
+                            - x1, y1 (int): 左上角坐标
+                            - x2, y2 (int): 右下角坐标
+                            - width, height (int): 宽度和高度
+                    - image_base64 (str): 检测结果图片的base64编码
+                    - image_path (str): 检测结果图片的保存路径
+                    - has_detections (bool): 是否检测到目标
+            callback_interval (float, optional): 回调间隔时间(秒)，默认1.0秒
+                用于控制回调频率，避免回调过于频繁
+        """
+        self.task_id = task_id
         self.callback_func = callback_func
+        self.callback_interval = callback_interval
+
+    def stop(self):
+        """停止处理"""
+        if self.config['print']['enabled']:
+            logger.info(f"停止任务: {self.task_id}")
+        self.running = False
 
     def format_detections(self, results: list) -> list:
         """格式化检测结果为标准字典格式
@@ -933,37 +886,14 @@ config      - 显示当前配置
             })
         return formatted
 
-    def stop(self):
-        """停止处理"""
-        self.running = False
-
-    def set_task_info(self, task_id: str, callback_func=None, callback_interval: float = 1.0):
-        """设置任务信息和回调参数
-        
-        Args:
-            task_id (str): 任务唯一标识符，用于区分不同的分析任务
-            callback_func (Callable, optional): 回调函数，用于接收检测结果
-                回调函数格式: async def callback(data: dict)
-                data 参数包含:
-                    - task_id (str): 任务ID
-                    - timestamp (str): 检测时间，ISO格式
-                    - detections (List[dict]): 检测结���列表，每个检测包含:
-                        - track_id (int): 目标跟踪ID
-                        - class (str): 目标类别
-                        - confidence (float): 置信度
-                        - bbox (dict): 边界框信息
-                            - x1, y1 (int): 左上角坐标
-                            - x2, y2 (int): 右下角坐标
-                            - width, height (int): 宽度和高度
-                    - image_base64 (str): 检测结果图片的base64编码
-                    - image_path (str): 检测结果图片的保存路径
-                    - has_detections (bool): 是否检测到目标
-            callback_interval (float, optional): 回调间隔时间(秒)，默认1.0秒
-                用于控制回调频率，避免回调过于频繁
-        """
-        self.task_id = task_id
-        self.callback_func = callback_func
-        self.callback_interval = callback_interval
-
-if __name__ == "__main__":
-    print("请使用 run.py 启完整服务") 
+    @staticmethod
+    def print_help():
+        """打印帮助信息"""
+        print("""\n可用命令:
+start       - 开始分析
+stop        - 停止分析
+quit/exit   - 退出程序
+help        - 显示帮助信息
+status      - 显示前状态
+config      - 显示当前配置
+""")

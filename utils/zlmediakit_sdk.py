@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 class ZLMediaKitSDK:
     def __init__(self):
-        logger.info("初始化ZLMediaKit SDK")
         self.players = {}
         self.callbacks = {}  # 保存回调函数的引用
         self.events = {}  # 保存事件对象
@@ -34,7 +33,6 @@ class ZLMediaKitSDK:
             for path in possible_paths:
                 if os.path.exists(path):
                     lib_path = path
-                    logger.info(f"找到ZLMediaKit动态库: {path}")
                     break
                     
             if not lib_path:
@@ -42,7 +40,6 @@ class ZLMediaKitSDK:
                 
             self.lib = cdll.LoadLibrary(lib_path)
             self._init_functions()
-            logger.info("ZLMediaKit API初始化成功")
             
         except Exception as e:
             logger.error(f"加载动态库失败: {str(e)}")
@@ -70,8 +67,6 @@ class ZLMediaKitSDK:
             # 关闭播放器
             self.lib.mk_proxy_player_release.argtypes = [c_void_p]
             self.lib.mk_proxy_player_release.restype = None
-            
-            logger.info("ZLMediaKit 函数初始化成功")
             
         except Exception as e:
             logger.error(f"初始化SDK函数失败: {str(e)}")
@@ -106,9 +101,7 @@ class ZLMediaKitSDK:
             @CFUNCTYPE(None, c_void_p, c_int, c_void_p)
             def on_play_result(user_data, err_code, err_msg):
                 try:
-                    logger.info(f"播放结果回调: err_code={err_code}, err_msg={err_msg}")
                     if err_code == 0:
-                        logger.info("代理播放成功")
                         self.players[stream_id] = player
                         self.events[stream_id].set()
                     else:
@@ -121,13 +114,10 @@ class ZLMediaKitSDK:
             # 设置关闭回调
             @CFUNCTYPE(None, c_void_p, c_void_p)
             def on_close(user_data, err_msg):
-                logger.info("代理播放器被关闭")
-                # 不要在这里调用close_proxy，避免循环调用
                 if stream_id in self.players:
                     del self.players[stream_id]
                 if stream_id in self.callbacks:
                     del self.callbacks[stream_id]
-                # 设置事件
                 if stream_id in self.events:
                     self.events[stream_id].set()
             
@@ -137,7 +127,6 @@ class ZLMediaKitSDK:
                 'close': on_close
             }
             
-            logger.info("设置回调...")
             # 设置回调
             self.lib.mk_proxy_player_set_on_play_result(
                 player, 
@@ -150,13 +139,10 @@ class ZLMediaKitSDK:
                 None
             )
             
-            logger.info("开始播放...")
             # 开始播放
             ret = self.lib.mk_proxy_player_play(player, url.encode())
-            logger.info(f"播放返回值: {ret}")
             
             # 等待回调执行
-            logger.info("等待回调...")
             if not self.events[stream_id].wait(timeout=5.0):  # 最多等待5秒
                 raise Exception("等待播放结果超时")
             
@@ -164,7 +150,6 @@ class ZLMediaKitSDK:
             if stream_id not in self.players:
                 raise Exception("代理播放器创建失败")
             
-            logger.info(f"创建代理成功: {proxy_url}")
             return player, proxy_url
             
         except Exception as e:
@@ -189,6 +174,5 @@ class ZLMediaKitSDK:
                         break
                 
                 self.lib.mk_proxy_player_release(player)
-                logger.info("RTSP代理已关闭")
             except Exception as e:
                 logger.error(f"关闭RTSP代理失败: {str(e)}")
